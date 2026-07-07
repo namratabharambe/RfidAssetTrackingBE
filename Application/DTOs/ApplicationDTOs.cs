@@ -101,9 +101,32 @@ namespace Application.DTOs
     public record CreateAssetMovementDto(Guid AssetId, Guid? DestinationLocationId, string MovementType, Guid? ReaderId, Guid? HandheldDeviceId, string? Remarks);
 
     // Audit DTOs
-    public record InventoryAuditDto(Guid Id, string Title, DateTime AuditDate, string Status, Guid AuditorUserId, string AuditorUsername, List<InventoryAuditItemDto> AuditItems);
+    public record InventoryAuditDto
+    {
+        public Guid Id { get; init; }
+        public string Title { get; init; } = null!;
+        public DateTime AuditDate { get; init; }
+        public string Status { get; init; } = null!;
+        public Guid AuditorUserId { get; init; }
+        public string? AuditorUsername { get; init; }
+        public List<InventoryAuditItemDto> AuditItems { get; init; } = new();
+    }
     public record CreateInventoryAuditDto(string Title, Guid AuditorUserId, List<Guid> AssetIds);
-    public record InventoryAuditItemDto(Guid Id, Guid InventoryAuditId, Guid AssetId, string AssetName, string AssetNumber, Guid? ExpectedLocationId, string? ExpectedLocationName, Guid? ScannedLocationId, string? ScannedLocationName, string Status, DateTime? ScannedDate, string? Notes);
+    public record InventoryAuditItemDto
+    {
+        public Guid Id { get; init; }
+        public Guid InventoryAuditId { get; init; }
+        public Guid AssetId { get; init; }
+        public string AssetName { get; init; } = null!;
+        public string AssetNumber { get; init; } = null!;
+        public Guid? ExpectedLocationId { get; init; }
+        public string? ExpectedLocationName { get; init; }
+        public Guid? ScannedLocationId { get; init; }
+        public string? ScannedLocationName { get; init; }
+        public string Status { get; init; } = null!;
+        public DateTime? ScannedDate { get; init; }
+        public string? Notes { get; init; }
+    }
 
     // Scanning DTOs
     public record ScanSessionDto(Guid Id, string SessionName, DateTime StartTime, DateTime? EndTime, Guid? ReaderId, string? ReaderName, Guid? HandheldDeviceId, string? HandheldDeviceName, bool IsRunning, List<ScanEventDto> ScanEvents);
