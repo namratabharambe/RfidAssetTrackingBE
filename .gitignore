@@ -1,0 +1,48 @@
+## Ignore Visual Studio temporary files, build results, and user settings
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userprev
+*.useroverride
+
+# User-specific files (MonoDevelop/Xamarin Studio)
+*.userprefs
+
+# Mono auto-generated files
+mono_crash.*
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+[Log]s/
+[Tt]est[Rr]esults/
+
+# Visual Studio 2015/2017/2019/2022 cache directory
+.vs/
+
+# SQL Server files
+*.mdf
+*.ldf
+*.ndf
+
+# Packages
+*.nupkg
+**/packages/*
+!**/packages/repositories.config
+
+# EF Core migrations migrations bundle output
+*.exe
+
+# Rider
+.idea/
+*.sln.iml

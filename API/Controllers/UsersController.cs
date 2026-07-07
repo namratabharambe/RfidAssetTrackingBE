@@ -1,0 +1,218 @@
+using Application.DTOs;
+using Application.Users.Queries;
+using Application.Interfaces;
+using Domain.Entities;
+using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AutoMapper;
+
+namespace API.Controllers
+{
+    [Authorize]
+    [ApiController]
+    [Route("api/users")]
+    public class UsersController : ControllerBase
+    {
+        private readonly IMediator _mediator;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IMapper _mapper;
+        private readonly IAuthService _authService;
+
+        public UsersController(IMediator mediator, IUnitOfWork unitOfWork, IMapper mapper, IAuthService authService)
+        {
+            _mediator = mediator;
+            _unitOfWork = unitOfWork;
+            _mapper = mapper;
+            _authService = authService;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
+        {
+            var users = await _mediator.Send(new GetUsersQuery());
+            return Ok(users);
+        }
+
+        [HttpGet("{id:guid}")]
+        public async Task<ActionResult<UserDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var user = await _unitOfWork.Repository<User>().GetByIdAsync(id, cancellationToken, u => u.UserRoles, u => u.Site);
+            if (user == null) return NotFound();
+
+            // Populate roles and permissions
+            foreach (var ur in user.UserRoles)
+            {
+                var role = await _unitOfWork.Repository<Role>().GetByIdAsync(ur.RoleId, cancellationToken, r => r.RolePermissions);
+                if (role != null)
+                {
+                    ur.Role = role;
+                    foreach (var rp in role.RolePermissions)
+                    {
+                        var permission = await _unitOfWork.Repository<Permission>().GetByIdAsync(rp.PermissionId, cancellationToken);
+                        if (permission != null) rp.Permission = permission;
+                    }
+                }
+            }
+
+            return Ok(_mapper.Map<UserDto>(user));
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserDto createDto, CancellationToken cancellationToken)
+        {
+            // Validate Role IDs exist
+            if (createDto.RoleIds != null && createDto.RoleIds.Any())
+            {
+                foreach (var roleId in createDto.RoleIds)
+                {
+                    var role = await _unitOfWork.Repository<Role>().GetByIdAsync(roleId, cancellationToken);
+                    if (role == null)
+                    {
+                        return BadRequest($"Role with ID '{roleId}' does not exist.");
+                    }
+                }
+            }
+
+            // Validate Site ID exists
+            if (createDto.SiteId != null)
+            {
+                var site = await _unitOfWork.Repository<Site>().GetByIdAsync(createDto.SiteId.Value, cancellationToken);
+                if (site == null)
+                {
+                    return BadRequest($"Site with ID '{createDto.SiteId}' does not exist.");
+                }
+            }
+
+            var salt = _authService.GenerateSalt();
+            var hash = _authService.HashPassword(createDto.Password, salt);
+
+            var user = new User
+            {
+                Username = createDto.Username,
+                Email = createDto.Email,
+                PasswordHash = hash,
+                PasswordSalt = salt,
+                IsActive = true,
+                SiteId = createDto.SiteId
+            };
+
+            await _unitOfWork.Repository<User>().AddAsync(user, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (createDto.RoleIds != null)
+            {
+                foreach (var roleId in createDto.RoleIds)
+                {
+                    var userRole = new UserRole { UserId = user.Id, RoleId = roleId };
+                    await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);
+                }
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            // Fetch fully populated user to return
+            var createdUser = await _unitOfWork.Repository<User>().GetByIdAsync(user.Id, cancellationToken, u => u.UserRoles, u => u.Site);
+            if (createdUser != null)
+            {
+                foreach (var ur in createdUser.UserRoles)
+                {
+                    var r = await _unitOfWork.Repository<Role>().GetByIdAsync(ur.RoleId, cancellationToken, rp => rp.RolePermissions);
+                    if (r != null)
+                    {
+                        ur.Role = r;
+                        foreach (var rp in r.RolePermissions)
+                        {
+                            var p = await _unitOfWork.Repository<Permission>().GetByIdAsync(rp.PermissionId, cancellationToken);
+                            if (p != null) rp.Permission = p;
+                        }
+                    }
+                }
+                return CreatedAtAction(nameof(GetById), new { id = user.Id }, _mapper.Map<UserDto>(createdUser));
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = user.Id }, _mapper.Map<UserDto>(user));
+        }
+
+        [HttpPut("{id:guid}")]
+        public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserDto updateDto, CancellationToken cancellationToken)
+        {
+            // Validate Role IDs exist
+            if (updateDto.RoleIds != null && updateDto.RoleIds.Any())
+            {
+                foreach (var roleId in updateDto.RoleIds)
+                {
+                    var role = await _unitOfWork.Repository<Role>().GetByIdAsync(roleId, cancellationToken);
+                    if (role == null)
+                    {
+                        return BadRequest($"Role with ID '{roleId}' does not exist.");
+                    }
+                }
+            }
+
+            // Validate Site ID exists
+            if (updateDto.SiteId != null)
+            {
+                var site = await _unitOfWork.Repository<Site>().GetByIdAsync(updateDto.SiteId.Value, cancellationToken);
+                if (site == null)
+                {
+                    return BadRequest($"Site with ID '{updateDto.SiteId}' does not exist.");
+                }
+            }
+
+            var userRepo = _unitOfWork.Repository<User>();
+            var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
+            if (user == null) return NotFound();
+
+            user.Username = updateDto.Username;
+            user.Email = updateDto.Email;
+            user.IsActive = updateDto.IsActive;
+            user.SiteId = updateDto.SiteId;
+
+            userRepo.Update(user);
+
+            // Update user roles
+            var existingRoles = user.UserRoles.ToList();
+            foreach (var er in existingRoles)
+            {
+                _unitOfWork.Repository<UserRole>().Delete(er);
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (updateDto.RoleIds != null)
+            {
+                foreach (var roleId in updateDto.RoleIds)
+                {
+                    var userRole = new UserRole { UserId = user.Id, RoleId = roleId };
+                    await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);
+                }
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id:guid}")]
+        public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+        {
+            var userRepo = _unitOfWork.Repository<User>();
+            var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
+            if (user == null) return NotFound();
+
+            // Delete associated user roles
+            foreach (var ur in user.UserRoles)
+            {
+                _unitOfWork.Repository<UserRole>().Delete(ur);
+            }
+
+            userRepo.Delete(user);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return NoContent();
+        }
+    }
+}

@@ -1,0 +1,15 @@
+using Domain.Entities;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Application.Interfaces
+{
+    public interface IAuthService
+    {
+        string HashPassword(string password, string salt);
+        string GenerateSalt();
+        string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes);
+        Task<RefreshToken> GenerateRefreshTokenAsync(Guid userId, string ipAddress, CancellationToken cancellationToken = default);
+    }
+}

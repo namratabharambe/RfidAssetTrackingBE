@@ -1,0 +1,82 @@
+using System;
+
+namespace Application.DTOs;
+
+public record AssetDto(
+    Guid Id,
+    string AssetNumber,
+    string Name,
+    string? Description,
+    string? SerialNumber,
+    string Status,
+    Guid AssetCategoryId,
+    string? QrCode,
+    string? Group,
+    string? AssetType,
+    string? OwnerDepartment,
+    string? Industry,
+    string? BusinessUnit,
+    string? CurrentCustodian,
+    string? CustodianEmail,
+    string? Model,
+    string? WarrantyProvider,
+    DateTime? PurchaseDate,
+    decimal? PurchasePrice,
+    DateTime? WarrantyExpiryDate,
+    Guid? ManufacturerId,
+    Guid? SiteId,
+    Guid? ZoneId,
+    Guid? WarehouseId
+);
+
+public record CreateAssetDto(
+    string AssetNumber,
+    string Name,
+    Guid AssetCategoryId,
+    string? Description,
+    string? SerialNumber,
+    string Status,
+    string? QrCode,
+    string? Group,
+    string? AssetType,
+    string? OwnerDepartment,
+    string? Industry,
+    string? BusinessUnit,
+    string? CurrentCustodian,
+    string? CustodianEmail,
+    string? Model,
+    string? WarrantyProvider,
+    DateTime? PurchaseDate,
+    decimal? PurchasePrice,
+    DateTime? WarrantyExpiryDate,
+    Guid? ManufacturerId,
+    Guid? SiteId,
+    Guid? ZoneId,
+    Guid? WarehouseId
+);
+
+public record UpdateAssetDto(
+    string AssetNumber,
+    string Name,
+    Guid AssetCategoryId,
+    string? Description,
+    string? SerialNumber,
+    string Status,
+    string? QrCode,
+    string? Group,
+    string? AssetType,
+    string? OwnerDepartment,
+    string? Industry,
+    string? BusinessUnit,
+    string? CurrentCustodian,
+    string? CustodianEmail,
+    string? Model,
+    string? WarrantyProvider,
+    DateTime? PurchaseDate,
+    decimal? PurchasePrice,
+    DateTime? WarrantyExpiryDate,
+    Guid? ManufacturerId,
+    Guid? SiteId,
+    Guid? ZoneId,
+    Guid? WarehouseId
+);
