@@ -25,6 +25,42 @@ namespace Application.Audits.Commands.ReconcileAudit
             var audit = await auditRepo.GetByIdAsync(request.AuditId, cancellationToken);
             if (audit == null) return false;
 
+            // Resolve SiteId to LocationId if needed to protect foreign key constraints
+            Guid? scannedLocationId = request.ScannedLocationId;
+            if (scannedLocationId.HasValue)
+            {
+                var isSite = await _unitOfWork.Repository<Site>().GetByIdAsync(scannedLocationId.Value, cancellationToken) != null;
+                if (isSite)
+                {
+                    var locations = await _unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == scannedLocationId.Value, cancellationToken, l => l.Zone.Warehouse);
+                    var firstLoc = locations.FirstOrDefault();
+                    if (firstLoc != null)
+                    {
+                        scannedLocationId = firstLoc.Id;
+                    }
+                    else
+                    {
+                        // Create dummy warehouse/zone/location structure for the site to preserve constraint integrity
+                        var firstWarehouse = (await _unitOfWork.Repository<Warehouse>().GetFilteredAsync(w => w.SiteId == scannedLocationId.Value, cancellationToken)).FirstOrDefault();
+                        if (firstWarehouse == null)
+                        {
+                            firstWarehouse = new Warehouse { Id = Guid.NewGuid(), Code = "WH-AUDIT", Name = "Audit Warehouse", SiteId = scannedLocationId.Value, CreatedOn = DateTime.UtcNow };
+                            await _unitOfWork.Repository<Warehouse>().AddAsync(firstWarehouse, cancellationToken);
+                        }
+                        var firstZone = (await _unitOfWork.Repository<Zone>().GetFilteredAsync(z => z.WarehouseId == firstWarehouse.Id, cancellationToken)).FirstOrDefault();
+                        if (firstZone == null)
+                        {
+                            firstZone = new Zone { Id = Guid.NewGuid(), Code = "Z-AUDIT", Name = "Audit Zone", WarehouseId = firstWarehouse.Id, CreatedOn = DateTime.UtcNow };
+                            await _unitOfWork.Repository<Zone>().AddAsync(firstZone, cancellationToken);
+                        }
+                        var defaultLoc = new Location { Id = Guid.NewGuid(), Code = "LOC-AUDIT", Name = "Audit Location", ZoneId = firstZone.Id, CreatedOn = DateTime.UtcNow };
+                        await _unitOfWork.Repository<Location>().AddAsync(defaultLoc, cancellationToken);
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                        scannedLocationId = defaultLoc.Id;
+                    }
+                }
+            }
+
             // Fetch expected items for this audit
             var auditItemRepo = _unitOfWork.Repository<InventoryAuditItem>();
             var expectedItems = await auditItemRepo.GetFilteredAsync(x => x.InventoryAuditId == request.AuditId, cancellationToken);
@@ -55,7 +91,7 @@ namespace Application.Audits.Commands.ReconcileAudit
                 if (scannedAssetIds.Contains(item.AssetId))
                 {
                     item.Status = AuditItemStatus.Found;
-                    item.ScannedLocationId = request.ScannedLocationId;
+                    item.ScannedLocationId = scannedLocationId;
                     item.ScannedDate = DateTime.UtcNow;
                     item.Notes = "Verified present during audit scan.";
                     scannedAssetIds.Remove(item.AssetId); // Item handled
@@ -75,11 +111,13 @@ namespace Application.Audits.Commands.ReconcileAudit
                 if (asset != null)
                 {
                     var originalSiteId = asset.SiteId;
+                    var originalLocationId = asset.LocationId;
 
                     // Update asset location to new physical location
                     if (request.ScannedLocationId.HasValue)
                     {
                         asset.SiteId = request.ScannedLocationId;
+                        asset.LocationId = scannedLocationId;
                         assetRepo.Update(asset);
 
                         // Log an AssetMovement record for this physical relocation correction
@@ -101,11 +139,11 @@ namespace Application.Audits.Commands.ReconcileAudit
                         Id = Guid.NewGuid(),
                         InventoryAuditId = audit.Id,
                         AssetId = assetId,
-                        ExpectedLocationId = originalSiteId,
-                        ScannedLocationId = request.ScannedLocationId,
+                        ExpectedLocationId = originalLocationId,
+                        ScannedLocationId = scannedLocationId,
                         Status = AuditItemStatus.Misplaced,
                         ScannedDate = DateTime.UtcNow,
-                        Notes = $"Misplaced asset. Expected at {originalSiteId?.ToString() ?? "N/A"}, found at {request.ScannedLocationId?.ToString() ?? "N/A"}."
+                        Notes = $"Misplaced asset. Expected at location {originalLocationId?.ToString() ?? "N/A"}, found at {scannedLocationId?.ToString() ?? "N/A"}."
                     };
                     await auditItemRepo.AddAsync(misplacedItem, cancellationToken);
                 }

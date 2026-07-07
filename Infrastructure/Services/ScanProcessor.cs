@@ -77,6 +77,8 @@ namespace Infrastructure.Services
                         if (asset != null)
                         {
                             Guid? originalSiteId = asset.SiteId;
+                            Guid? originalLocationId = asset.LocationId;
+                            Guid? scannedLocationId = asset.LocationId;
                             Guid? destinationLocationId = null;
                             if (scanEvent.ReaderId != null)
                             {
@@ -84,9 +86,18 @@ namespace Infrastructure.Services
                                 if (reader != null)
                                 {
                                     asset.SiteId = reader.SiteId;
+                                    
+                                    // Resolve Location under reader's SiteId
+                                    var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == reader.SiteId, stoppingToken, l => l.Zone.Warehouse);
+                                    var firstLoc = locations.FirstOrDefault();
+                                    if (firstLoc != null)
+                                    {
+                                        scannedLocationId = firstLoc.Id;
+                                    }
                                 }
                             }
 
+                            asset.LocationId = scannedLocationId;
                             assetRepo.Update(asset);
 
                             // Reconcile with active audits
@@ -104,7 +115,7 @@ namespace Infrastructure.Services
                                     if (item.Status != AuditItemStatus.Found)
                                     {
                                         item.Status = AuditItemStatus.Found;
-                                        item.ScannedLocationId = asset.SiteId;
+                                        item.ScannedLocationId = scannedLocationId;
                                         item.ScannedDate = scanEvent.Timestamp;
                                         item.Notes = $"Auto-detected by ScanProcessor via reader {scanEvent.ReaderId?.ToString() ?? scanEvent.HandheldDeviceId?.ToString()}.";
                                         auditItemRepo.Update(item);
@@ -117,8 +128,8 @@ namespace Infrastructure.Services
                                         Id = Guid.NewGuid(),
                                         InventoryAuditId = audit.Id,
                                         AssetId = asset.Id,
-                                        ExpectedLocationId = originalSiteId,
-                                        ScannedLocationId = asset.SiteId,
+                                        ExpectedLocationId = originalLocationId,
+                                        ScannedLocationId = scannedLocationId,
                                         Status = AuditItemStatus.Misplaced,
                                         ScannedDate = scanEvent.Timestamp,
                                         Notes = "Misplaced asset auto-detected by ScanProcessor background worker."

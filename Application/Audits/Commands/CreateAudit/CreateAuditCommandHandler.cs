@@ -46,7 +46,7 @@ namespace Application.Audits.Commands.CreateAudit
                     Id = Guid.NewGuid(),
                     InventoryAuditId = audit.Id,
                     AssetId = asset.Id,
-                    ExpectedLocationId = asset.SiteId, // Using SiteId as the expected location/site
+                    ExpectedLocationId = asset.LocationId, // Using LocationId as the expected location/bin
                     Status = AuditItemStatus.Missing,
                     CreatedOn = DateTime.UtcNow
                 };
