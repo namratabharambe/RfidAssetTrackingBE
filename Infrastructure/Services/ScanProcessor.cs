@@ -76,6 +76,7 @@ namespace Infrastructure.Services
                         var asset = await assetRepo.GetByIdAsync(tag.AssetId.Value, stoppingToken);
                         if (asset != null)
                         {
+                            Guid? originalSiteId = asset.SiteId;
                             Guid? destinationLocationId = null;
                             if (scanEvent.ReaderId != null)
                             {
@@ -88,11 +89,55 @@ namespace Infrastructure.Services
 
                             assetRepo.Update(asset);
 
+                            // Reconcile with active audits
+                            var auditRepo = unitOfWork.Repository<InventoryAudit>();
+                            var auditItemRepo = unitOfWork.Repository<InventoryAuditItem>();
+                            var activeAudits = await auditRepo.GetFilteredAsync(x => x.Status == AuditStatus.InProgress || x.Status == AuditStatus.Scheduled, stoppingToken);
+
+                            foreach (var audit in activeAudits)
+                            {
+                                var auditItems = await auditItemRepo.GetFilteredAsync(x => x.InventoryAuditId == audit.Id && x.AssetId == asset.Id, stoppingToken);
+                                var item = auditItems.FirstOrDefault();
+
+                                if (item != null)
+                                {
+                                    if (item.Status != AuditItemStatus.Found)
+                                    {
+                                        item.Status = AuditItemStatus.Found;
+                                        item.ScannedLocationId = asset.SiteId;
+                                        item.ScannedDate = scanEvent.Timestamp;
+                                        item.Notes = $"Auto-detected by ScanProcessor via reader {scanEvent.ReaderId?.ToString() ?? scanEvent.HandheldDeviceId?.ToString()}.";
+                                        auditItemRepo.Update(item);
+                                    }
+                                }
+                                else
+                                {
+                                    var misplacedItem = new InventoryAuditItem
+                                    {
+                                        Id = Guid.NewGuid(),
+                                        InventoryAuditId = audit.Id,
+                                        AssetId = asset.Id,
+                                        ExpectedLocationId = originalSiteId,
+                                        ScannedLocationId = asset.SiteId,
+                                        Status = AuditItemStatus.Misplaced,
+                                        ScannedDate = scanEvent.Timestamp,
+                                        Notes = "Misplaced asset auto-detected by ScanProcessor background worker."
+                                    };
+                                    await auditItemRepo.AddAsync(misplacedItem, stoppingToken);
+                                }
+
+                                if (audit.Status == AuditStatus.Scheduled)
+                                {
+                                    audit.Status = AuditStatus.InProgress;
+                                    auditRepo.Update(audit);
+                                }
+                            }
+
                             var movement = new AssetMovement
                             {
                                 Id = Guid.NewGuid(),
                                 AssetId = asset.Id,
-                                SourceLocationId = asset.LocationId,
+                                SourceLocationId = originalSiteId,
                                 DestinationLocationId = destinationLocationId,
                                 MovementDate = scanEvent.Timestamp,
                                 MovementType = "RFIDScan",
