@@ -33,7 +33,9 @@ namespace API.Controllers
             Guid? readerGuid = null;
             Guid? handheldGuid = null;
 
-            if (Guid.TryParse(batch.ReaderId, out var parsedGuid))
+            string resolvedReaderId = batch.ReaderId ?? batch.DeviceId ?? "";
+
+            if (Guid.TryParse(resolvedReaderId, out var parsedGuid))
             {
                 var readerExists = await _db.Readers.AnyAsync(r => r.Id == parsedGuid);
                 if (readerExists)
@@ -52,14 +54,14 @@ namespace API.Controllers
             else
             {
                 // Try looking up by serial or ip or name
-                var reader = await _db.Readers.FirstOrDefaultAsync(r => r.IpAddress == batch.ReaderId || r.Name == batch.ReaderId);
+                var reader = await _db.Readers.FirstOrDefaultAsync(r => r.IpAddress == resolvedReaderId || r.Name == resolvedReaderId);
                 if (reader != null)
                 {
                     readerGuid = reader.Id;
                 }
                 else
                 {
-                    var handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.DeviceSerial == batch.ReaderId || h.Name == batch.ReaderId);
+                    var handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.DeviceSerial == resolvedReaderId || h.Name == resolvedReaderId);
                     if (handheld != null)
                     {
                         handheldGuid = handheld.Id;
@@ -102,7 +104,7 @@ namespace API.Controllers
                     ScanId = scanId,
                     Epc = e.Epc,
                     Rssi = e.Rssi,
-                    ReaderId = batch.ReaderId,
+                    ReaderId = resolvedReaderId,
                     SiteId = batch.SiteId,
                     Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp,
                     type = e.type,
@@ -136,7 +138,8 @@ namespace API.Controllers
 
     public class RfidEventBatch
     {
-        public string ReaderId { get; set; } = null!;
+        public string? ReaderId { get; set; }
+        public string? DeviceId { get; set; } // Support alternate fixed reader payloads
         public string SiteId { get; set; } = null!;
         public List<RfidEvent> Events { get; set; } = new();
     }
