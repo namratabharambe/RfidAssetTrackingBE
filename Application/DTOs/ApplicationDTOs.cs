@@ -78,7 +78,16 @@ namespace Application.DTOs
     public record ReaderDto(Guid Id, string Name, string IpAddress, int Port, string Status, int AntennaCount, int PowerDbm, string? Model, Guid SiteId, string SiteName);
     public record CreateReaderDto(string Name, string IpAddress, int Port, int AntennaCount, int PowerDbm, Guid SiteId, string? Model = null, string? Status = null);
 
-    public record HandheldDeviceDto(Guid Id, string Name, string DeviceSerial, string? Model, string Status, Guid? AssignedUserId, string? AssignedUsername);
+    public record HandheldDeviceDto
+    {
+        public Guid Id { get; init; }
+        public string Name { get; init; } = null!;
+        public string DeviceSerial { get; init; } = null!;
+        public string? Model { get; init; }
+        public string Status { get; init; } = null!;
+        public Guid? AssignedUserId { get; init; }
+        public string? AssignedUsername { get; init; }
+    }
     public record CreateHandheldDeviceDto(string Name, string DeviceSerial, string? Model, Guid? AssignedUserId);
 
     // Operations DTOs
