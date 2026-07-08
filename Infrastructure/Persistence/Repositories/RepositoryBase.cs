@@ -61,9 +61,7 @@ namespace Infrastructure.Persistence.Repositories
 
         public virtual void Delete(T entity)
         {
-            entity.IsDeleted = true;
-            entity.DeletedOn = DateTime.UtcNow;
-            DbSet.Update(entity);
+            DbSet.Remove(entity);
         }
 
         public virtual async Task<(List<T> Items, int TotalCount)> GetPagedAsync(
