@@ -101,6 +101,9 @@ namespace Infrastructure.Services
                                 var handheld = await unitOfWork.Repository<HandheldDevice>().GetByIdAsync(scanEvent.HandheldDeviceId.Value, stoppingToken);
                                 if (handheld != null)
                                 {
+                                    // Default to Office Shelf location (ID: 019f39bb-a292-7f9e-a894-3252a13b4825)
+                                    scannedLocationId = Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
+
                                     var gpsDevices = await unitOfWork.Repository<GPSDevice>().GetFilteredAsync(g => g.Imei == handheld.DeviceSerial, stoppingToken);
                                     var gpsDevice = gpsDevices.FirstOrDefault();
                                     if (gpsDevice != null)
@@ -129,12 +132,16 @@ namespace Infrastructure.Services
                                             if (closestLocation != null)
                                             {
                                                 scannedLocationId = closestLocation.Id;
-                                                var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(closestLocation.Id, stoppingToken, l => l.Zone.Warehouse);
-                                                if (locWithSite?.Zone?.Warehouse != null)
-                                                {
-                                                    asset.SiteId = locWithSite.Zone.Warehouse.SiteId;
-                                                }
                                             }
+                                        }
+                                    }
+
+                                    if (scannedLocationId != null)
+                                    {
+                                        var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(scannedLocationId.Value, stoppingToken, l => l.Zone.Warehouse);
+                                        if (locWithSite?.Zone?.Warehouse != null)
+                                        {
+                                            asset.SiteId = locWithSite.Zone.Warehouse.SiteId;
                                         }
                                     }
                                 }
