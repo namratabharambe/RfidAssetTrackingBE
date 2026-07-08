@@ -331,10 +331,14 @@ namespace API.Controllers
         [HttpGet("readerlist")]
         public async Task<ActionResult> GetReaderList(Guid siteId, string scanMode)
         {
+            // Try to find fixed readers for this site first
+            var emptyGuid = Guid.Empty;
             var readers = await _db.Readers
-                .Where(r => r.SiteId == siteId)
+                .Where(r => siteId == emptyGuid || r.SiteId == siteId)
                 .Select(r => new
                 {
+                    ReaderId = r.Id.ToString(),
+                    ReaderId2 = r.Id.ToString(),
                     id = r.Id,
                     name = r.Name,
                     ipAddress = r.IpAddress,
@@ -343,7 +347,29 @@ namespace API.Controllers
                     powerDbm = r.PowerDbm,
                     status = r.Status
                 })
-                .ToListAsync();
+                .ToListAsync<object>();
+
+            // Fallback: if no fixed readers, return registered handheld devices
+            // The Android app uses ReaderId from this list to post scans
+            if (readers.Count == 0)
+            {
+                var handhelds = await _db.HandheldDevices
+                    .Where(h => !h.IsDeleted)
+                    .Select(h => new
+                    {
+                        ReaderId = h.DeviceSerial,
+                        ReaderId2 = h.Id.ToString(),
+                        id = h.Id,
+                        name = h.Name,
+                        ipAddress = h.DeviceSerial,
+                        port = 0,
+                        antennaCount = 1,
+                        powerDbm = 0,
+                        status = h.Status
+                    })
+                    .ToListAsync<object>();
+                return Ok(handhelds);
+            }
 
             return Ok(readers);
         }
