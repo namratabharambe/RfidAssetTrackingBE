@@ -148,8 +148,8 @@ namespace Infrastructure.Services
                             {
                                 Id = Guid.NewGuid(),
                                 AssetId = asset.Id,
-                                SourceLocationId = originalSiteId,
-                                DestinationLocationId = destinationLocationId,
+                                SourceLocationId = originalLocationId,
+                                DestinationLocationId = scannedLocationId,
                                 MovementDate = scanEvent.Timestamp,
                                 MovementType = "RFIDScan",
                                 ReaderId = scanEvent.ReaderId,
@@ -168,6 +168,13 @@ namespace Infrastructure.Services
                                 AntennaIndex = scanEvent.AntennaIndex,
                                 Location = movement.Remarks
                             }, stoppingToken);
+                            scanEvent.Status = ScanStatus.Processed;
+                            scanEventRepo.Update(scanEvent);
+                        }
+                        else
+                        {
+                            scanEvent.Status = ScanStatus.Unknown;
+                            scanEventRepo.Update(scanEvent);
                         }
                     }
 
