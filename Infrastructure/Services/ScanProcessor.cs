@@ -96,6 +96,49 @@ namespace Infrastructure.Services
                                     }
                                 }
                             }
+                            else if (scanEvent.HandheldDeviceId != null)
+                            {
+                                var handheld = await unitOfWork.Repository<HandheldDevice>().GetByIdAsync(scanEvent.HandheldDeviceId.Value, stoppingToken);
+                                if (handheld != null)
+                                {
+                                    var gpsDevices = await unitOfWork.Repository<GPSDevice>().GetFilteredAsync(g => g.Imei == handheld.DeviceSerial, stoppingToken);
+                                    var gpsDevice = gpsDevices.FirstOrDefault();
+                                    if (gpsDevice != null)
+                                    {
+                                        var histories = await unitOfWork.Repository<GPSHistory>().GetFilteredAsync(h => h.GPSDeviceId == gpsDevice.Id, stoppingToken);
+                                        var latestGps = histories.OrderByDescending(h => h.Timestamp).FirstOrDefault();
+                                        if (latestGps != null)
+                                        {
+                                            var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Latitude != null && l.Longitude != null, stoppingToken);
+                                            Location closestLocation = null;
+                                            double minDistance = double.MaxValue;
+
+                                            foreach (var loc in locations)
+                                            {
+                                                double latDiff = (double)loc.Latitude.Value - latestGps.Latitude;
+                                                double lonDiff = (double)loc.Longitude.Value - latestGps.Longitude;
+                                                double dist = Math.Sqrt(latDiff * latDiff + lonDiff * lonDiff);
+
+                                                if (dist < minDistance)
+                                                {
+                                                    minDistance = dist;
+                                                    closestLocation = loc;
+                                                }
+                                            }
+
+                                            if (closestLocation != null)
+                                            {
+                                                scannedLocationId = closestLocation.Id;
+                                                var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(closestLocation.Id, stoppingToken, l => l.Zone.Warehouse);
+                                                if (locWithSite?.Zone?.Warehouse != null)
+                                                {
+                                                    asset.SiteId = locWithSite.Zone.Warehouse.SiteId;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             asset.LocationId = scannedLocationId;
                             assetRepo.Update(asset);
