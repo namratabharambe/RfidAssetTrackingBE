@@ -373,6 +373,42 @@ namespace API.Controllers
 
             return Ok(readers);
         }
+
+        [HttpPost("/api/admin/users/save-driver")]
+        [AllowAnonymous]
+        public async Task<ActionResult> SaveDriver([FromBody] SaveDriverRequest request)
+        {
+            try
+            {
+                var existing = await _db.Drivers
+                    .FirstOrDefaultAsync(d => d.FullName.ToLower() == request.FullName.ToLower() && !d.IsDeleted);
+
+                if (existing == null)
+                {
+                    var driver = new Driver
+                    {
+                        Id = Guid.NewGuid(),
+                        FullName = request.FullName,
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    _db.Drivers.Add(driver);
+                    await _db.SaveChangesAsync();
+                }
+
+                return Ok(new { success = true, message = "Driver saved successfully" });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+    }
+
+    public class SaveDriverRequest
+    {
+        public string FullName { get; set; } = null!;
+        public string Type { get; set; } = null!;
+        public string SiteId { get; set; } = null!;
     }
 
     public class ScanInventoryRequestDto
