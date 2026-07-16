@@ -96,6 +96,56 @@ namespace Infrastructure.Services
                                     }
                                 }
                             }
+                            else if (scanEvent.HandheldDeviceId != null)
+                            {
+                                var handheld = await unitOfWork.Repository<HandheldDevice>().GetByIdAsync(scanEvent.HandheldDeviceId.Value, stoppingToken);
+                                if (handheld != null)
+                                {
+                                    // Default to Office Shelf location (ID: 019f39bb-a292-7f9e-a894-3252a13b4825)
+                                    scannedLocationId = Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
+
+                                    var gpsDevices = await unitOfWork.Repository<GPSDevice>().GetFilteredAsync(g => g.Imei == handheld.DeviceSerial, stoppingToken);
+                                    var gpsDevice = gpsDevices.FirstOrDefault();
+                                    if (gpsDevice != null)
+                                    {
+                                        var histories = await unitOfWork.Repository<GPSHistory>().GetFilteredAsync(h => h.GPSDeviceId == gpsDevice.Id, stoppingToken);
+                                        var latestGps = histories.OrderByDescending(h => h.Timestamp).FirstOrDefault();
+                                        if (latestGps != null)
+                                        {
+                                            var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Latitude != null && l.Longitude != null, stoppingToken);
+                                            Location closestLocation = null;
+                                            double minDistance = double.MaxValue;
+
+                                            foreach (var loc in locations)
+                                            {
+                                                double latDiff = (double)loc.Latitude.Value - latestGps.Latitude;
+                                                double lonDiff = (double)loc.Longitude.Value - latestGps.Longitude;
+                                                double dist = Math.Sqrt(latDiff * latDiff + lonDiff * lonDiff);
+
+                                                if (dist < minDistance)
+                                                {
+                                                    minDistance = dist;
+                                                    closestLocation = loc;
+                                                }
+                                            }
+
+                                            if (closestLocation != null)
+                                            {
+                                                scannedLocationId = closestLocation.Id;
+                                            }
+                                        }
+                                    }
+
+                                    if (scannedLocationId != null)
+                                    {
+                                        var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(scannedLocationId.Value, stoppingToken, l => l.Zone.Warehouse);
+                                        if (locWithSite?.Zone?.Warehouse != null)
+                                        {
+                                            asset.SiteId = locWithSite.Zone.Warehouse.SiteId;
+                                        }
+                                    }
+                                }
+                            }
 
                             asset.LocationId = scannedLocationId;
                             assetRepo.Update(asset);
@@ -148,8 +198,8 @@ namespace Infrastructure.Services
                             {
                                 Id = Guid.NewGuid(),
                                 AssetId = asset.Id,
-                                SourceLocationId = originalSiteId,
-                                DestinationLocationId = destinationLocationId,
+                                SourceLocationId = originalLocationId,
+                                DestinationLocationId = scannedLocationId,
                                 MovementDate = scanEvent.Timestamp,
                                 MovementType = "RFIDScan",
                                 ReaderId = scanEvent.ReaderId,
@@ -168,6 +218,13 @@ namespace Infrastructure.Services
                                 AntennaIndex = scanEvent.AntennaIndex,
                                 Location = movement.Remarks
                             }, stoppingToken);
+                            scanEvent.Status = ScanStatus.Processed;
+                            scanEventRepo.Update(scanEvent);
+                        }
+                        else
+                        {
+                            scanEvent.Status = ScanStatus.Unknown;
+                            scanEventRepo.Update(scanEvent);
                         }
                     }
 

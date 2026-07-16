@@ -5,6 +5,8 @@ using Application.Auth.Commands.Logout;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,6 +37,46 @@ namespace API.Controllers
             {
                 return Unauthorized(ex.Message);
             }
+        }
+
+        [HttpPost("/api/admin/users/login")]
+        [AllowAnonymous]
+        public async Task<ActionResult> HandheldLogin([FromBody] CompatibilityLoginRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var loginDto = new LoginDto(request.Email, request.Password);
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+                var result = await _mediator.Send(new LoginCommand(loginDto, ipAddress), cancellationToken);
+
+                var roleId = result.User.Roles.FirstOrDefault() ?? "operator";
+                
+                return Ok(new
+                {
+                    message = "Login successful",
+                    token = result.Token,
+                    user = new
+                    {
+                        userId = result.User.Id.ToString(),
+                        userName = result.User.Username,
+                        email = result.User.Email,
+                        siteId = result.User.SiteId?.ToString() ?? Guid.Empty.ToString(),
+                        roleId = roleId,
+                        roleName = roleId,
+                        clientType = "AssetTracking"
+                    }
+                });
+            }
+            catch (System.UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+        }
+
+        public class CompatibilityLoginRequest
+        {
+            public string Email { get; set; } = null!;
+            public string Password { get; set; } = null!;
         }
 
         [HttpPost("refresh")]
