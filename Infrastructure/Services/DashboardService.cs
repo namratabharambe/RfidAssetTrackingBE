@@ -23,15 +23,24 @@ namespace Infrastructure.Services
 
         public async Task<DashboardDto> GetDashboardDataAsync(CancellationToken cancellationToken = default)
         {
-            var assets = await _context.Assets.Where(x => !x.IsDeleted).ToListAsync(cancellationToken);
-            
+            var assets = await _context.Assets
+                .Include(a => a.Location).ThenInclude(l => l.Zone).ThenInclude(z => z.Warehouse)
+                .Include(a => a.Site)
+                .Where(x => !x.IsDeleted)
+                .ToListAsync(cancellationToken);
+
             var total = assets.Count;
             var available = assets.Count(x => x.Status == AssetStatus.Available);
             var assigned = assets.Count(x => x.Status == AssetStatus.Assigned);
             var underMaintenance = assets.Count(x => x.Status == AssetStatus.UnderMaintenance);
             var retired = assets.Count(x => x.Status == AssetStatus.Retired);
-            
-            var sites = await _context.Sites.Where(x => !x.IsDeleted).Include(x => x.Warehouses).ToListAsync(cancellationToken);
+
+            // ── Site Stats: breakdown per Site ──────────────────────────────────
+            var sites = await _context.Sites
+                .Where(x => !x.IsDeleted)
+                .Include(x => x.Warehouses)
+                .ToListAsync(cancellationToken);
+
             var siteStats = new List<SiteStatDto>();
             foreach (var site in sites)
             {
@@ -45,14 +54,26 @@ namespace Infrastructure.Services
                 ));
             }
 
-            var readers = await _context.Readers.Where(x => !x.IsDeleted).Include(r => r.Site).ToListAsync(cancellationToken);
+            // ── Reader Statuses ──────────────────────────────────────────────────
+            var readers = await _context.Readers
+                .Where(x => !x.IsDeleted)
+                .Include(r => r.Site)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
             var readerStatuses = readers.Select(r => new ReaderStatusDto(
                 r.Name,
-                r.Site.Name,
+                r.Site?.Name ?? "—",
                 r.Status.ToString()
             )).ToList();
 
-            var gpsDevices = await _context.GPSDevices.Where(x => !x.IsDeleted).Include(g => g.Asset).ToListAsync(cancellationToken);
+            // ── GPS Device Statuses ──────────────────────────────────────────────
+            var gpsDevices = await _context.GPSDevices
+                .Where(x => !x.IsDeleted)
+                .Include(g => g.Asset)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
             var gpsStatuses = gpsDevices.Select(g => new GPSDeviceStatusDto(
                 g.Imei,
                 g.Asset != null ? g.Asset.Name : "Unassigned",
@@ -60,38 +81,72 @@ namespace Infrastructure.Services
                 g.Status.ToString()
             )).ToList();
 
-            var movements = await _context.AssetMovements.Where(x => !x.IsDeleted)
+            // ── Recent Activity: from scan events + movements ────────────────────
+            var recentScanEvents = await _context.ScanEvents
+                .Where(x => !x.IsDeleted)
+                .Include(e => e.HandheldDevice)
+                .Include(e => e.Reader)
+                .OrderByDescending(e => e.Timestamp)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
+            var recentActivity = recentScanEvents.Select(e =>
+            {
+                var src = e.Reader?.Name ?? e.HandheldDevice?.Name ?? "Reader";
+                var tag = e.EpcCode ?? "—";
+                return new ActivityLogDto(
+                    $"Tag [{tag}] scanned via {src}",
+                    e.Timestamp,
+                    e.HandheldDevice?.Name ?? e.Reader?.Name ?? "System"
+                );
+            }).ToList();
+
+            // Also pull last 5 asset movements and merge
+            var movements = await _context.AssetMovements
+                .Where(x => !x.IsDeleted)
                 .Include(m => m.Asset)
+                .Include(m => m.DestinationLocation)
                 .OrderByDescending(m => m.MovementDate)
                 .ToListAsync(cancellationToken);
-                
-            var recentActivity = movements.Select(m => new ActivityLogDto(
-                $"Asset '{m.Asset.Name}' ({m.Asset.AssetNumber}) was moved. Type: {m.MovementType}.",
-                m.MovementDate,
-                m.CreatedBy ?? "System"
-            )).ToList();
 
-            var alerts = await _context.Alerts.Where(x => !x.IsDeleted && !x.IsResolved)
+            foreach (var m in movements)
+            {
+                recentActivity.Add(new ActivityLogDto(
+                    $"Asset '{m.Asset?.Name}' ({m.Asset?.AssetNumber}) → {m.DestinationLocation?.Name ?? "Unknown"}. [{m.MovementType}]",
+                    m.MovementDate,
+                    m.CreatedBy ?? "System"
+                ));
+            }
+
+            recentActivity = recentActivity.OrderByDescending(a => a.Timestamp).Take(10).ToList();
+
+            // ── Alerts ──────────────────────────────────────────────────────────
+            var alerts = await _context.Alerts
+                .Where(x => !x.IsDeleted && !x.IsResolved)
                 .Include(a => a.Asset)
                 .OrderByDescending(a => a.CreatedOn)
                 .ToListAsync(cancellationToken);
 
-            var activeAlerts = alerts.Select(a => new AlertDto(
-                a.Id,
-                a.AssetId,
-                a.Asset != null ? a.Asset.Name : null,
-                a.AlertType.ToString(),
-                a.Severity.ToString(),
-                a.Title,
-                a.Message,
-                a.IsResolved,
-                a.ResolvedDate,
-                null
-            )).ToList();
+            var activeAlerts = alerts.Select(a => new AlertDto
+            {
+                Id = a.Id,
+                AssetId = a.AssetId,
+                AssetName = a.Asset?.Name,
+                AlertType = a.AlertType.ToString(),
+                Severity = a.Severity.ToString(),
+                Title = a.Title,
+                Message = a.Message,
+                IsResolved = a.IsResolved,
+                ResolvedDate = a.ResolvedDate,
+                ResolvedByUsername = null
+            }).ToList();
 
+            // ── Scan Counts (Today / Weekly / Monthly) ────────────────────────────
             var today = DateTime.UtcNow.Date;
-            var scanEvents = await _context.ScanEvents.Where(x => !x.IsDeleted && x.Timestamp >= today).ToListAsync(cancellationToken);
-            
+            var scanEvents = await _context.ScanEvents
+                .Where(x => !x.IsDeleted && x.Timestamp >= today)
+                .ToListAsync(cancellationToken);
+
             var todayScans = scanEvents
                 .GroupBy(x => x.Timestamp.Hour)
                 .Select(g => new ScanCountDto($"{g.Key:00}:00", g.Count()))
@@ -99,35 +154,32 @@ namespace Infrastructure.Services
                 .ToList();
 
             var weekAgo = today.AddDays(-7);
-            var weeklyEvents = await _context.ScanEvents.Where(x => !x.IsDeleted && x.Timestamp >= weekAgo).ToListAsync(cancellationToken);
-            
+            var weeklyEvents = await _context.ScanEvents
+                .Where(x => !x.IsDeleted && x.Timestamp >= weekAgo)
+                .ToListAsync(cancellationToken);
+
             var weeklyScans = weeklyEvents
                 .GroupBy(x => x.Timestamp.DayOfWeek)
                 .Select(g => new ScanCountDto(g.Key.ToString(), g.Count()))
                 .ToList();
 
             var yearAgo = today.AddMonths(-12);
-            var monthlyEvents = await _context.ScanEvents.Where(x => !x.IsDeleted && x.Timestamp >= yearAgo).ToListAsync(cancellationToken);
-            
+            var monthlyEvents = await _context.ScanEvents
+                .Where(x => !x.IsDeleted && x.Timestamp >= yearAgo)
+                .ToListAsync(cancellationToken);
+
             var monthlyScans = monthlyEvents
                 .GroupBy(x => x.Timestamp.Month)
-                .Select(g => new ScanCountDto(System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(g.Key), g.Count()))
+                .Select(g => new ScanCountDto(
+                    System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(g.Key),
+                    g.Count()))
                 .ToList();
 
             return new DashboardDto(
-                total,
-                available,
-                assigned,
-                underMaintenance,
-                retired,
-                siteStats,
-                readerStatuses,
-                gpsStatuses,
-                recentActivity,
-                activeAlerts,
-                todayScans,
-                weeklyScans,
-                monthlyScans
+                total, available, assigned, underMaintenance, retired,
+                siteStats, readerStatuses, gpsStatuses,
+                recentActivity, activeAlerts,
+                todayScans, weeklyScans, monthlyScans
             );
         }
     }

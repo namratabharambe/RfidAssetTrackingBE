@@ -26,7 +26,9 @@ public record AssetDto(
     Guid? ManufacturerId,
     Guid? SiteId,
     Guid? ZoneId,
-    Guid? WarehouseId
+    Guid? WarehouseId,
+    Guid? LocationId,
+    string? LocationName
 );
 
 public record CreateAssetDto(
@@ -52,7 +54,8 @@ public record CreateAssetDto(
     Guid? ManufacturerId,
     Guid? SiteId,
     Guid? ZoneId,
-    Guid? WarehouseId
+    Guid? WarehouseId,
+    Guid? LocationId
 );
 
 public record UpdateAssetDto(
@@ -78,5 +81,6 @@ public record UpdateAssetDto(
     Guid? ManufacturerId,
     Guid? SiteId,
     Guid? ZoneId,
-    Guid? WarehouseId
+    Guid? WarehouseId,
+    Guid? LocationId
 );

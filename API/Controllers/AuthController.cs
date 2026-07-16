@@ -45,12 +45,13 @@ namespace API.Controllers
         {
             try
             {
+                // Try with email as username (since LoginDto.Username can be email)
                 var loginDto = new LoginDto(request.Email, request.Password);
                 var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
                 var result = await _mediator.Send(new LoginCommand(loginDto, ipAddress), cancellationToken);
 
                 var roleId = result.User.Roles.FirstOrDefault() ?? "operator";
-                
+
                 return Ok(new
                 {
                     message = "Login successful",
@@ -67,9 +68,35 @@ namespace API.Controllers
                     }
                 });
             }
-            catch (System.UnauthorizedAccessException ex)
+            catch (System.UnauthorizedAccessException)
             {
-                return Unauthorized(new { message = ex.Message });
+                // Retry: maybe they logged in using username instead of email
+                try
+                {
+                    var loginDto2 = new LoginDto(request.Email, request.Password);
+                    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+                    var result2 = await _mediator.Send(new LoginCommand(loginDto2, ipAddress), cancellationToken);
+                    var roleId2 = result2.User.Roles.FirstOrDefault() ?? "operator";
+                    return Ok(new
+                    {
+                        message = "Login successful",
+                        token = result2.Token,
+                        user = new
+                        {
+                            userId = result2.User.Id.ToString(),
+                            userName = result2.User.Username,
+                            email = result2.User.Email,
+                            siteId = result2.User.SiteId?.ToString() ?? Guid.Empty.ToString(),
+                            roleId = roleId2,
+                            roleName = roleId2,
+                            clientType = "AssetTracking"
+                        }
+                    });
+                }
+                catch (System.UnauthorizedAccessException ex2)
+                {
+                    return Unauthorized(new { message = ex2.Message });
+                }
             }
         }
 

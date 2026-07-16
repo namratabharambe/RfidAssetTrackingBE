@@ -33,7 +33,8 @@ namespace Application.DTOs
             CreateMap<CreateZoneDto, Zone>();
 
             CreateMap<Location, LocationDto>()
-                .ForMember(dest => dest.ZoneName, opt => opt.MapFrom(src => src.Zone.Name));
+                .ForMember(dest => dest.ZoneName, opt => opt.MapFrom(src => src.Zone != null ? src.Zone.Name : null))
+                .ForMember(dest => dest.WarehouseName, opt => opt.MapFrom(src => src.Zone != null && src.Zone.Warehouse != null ? src.Zone.Warehouse.Name : null));
             CreateMap<CreateLocationDto, Location>();
 
             CreateMap<Manufacturer, ManufacturerDto>();
@@ -46,7 +47,8 @@ namespace Application.DTOs
             CreateMap<CreateAssetCategoryDto, AssetCategory>();
 
             CreateMap<Asset, AssetDto>()
-                .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
+                .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+                .ForMember(dest => dest.LocationName, opt => opt.MapFrom(src => src.Location != null ? src.Location.Name : null));
 
             CreateMap<RFIDTag, RFIDTagDto>()
                 .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))

@@ -304,6 +304,8 @@ namespace API.Controllers
             try
             {
                 DateTime gpsDateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
+                
+                // 1. Update Vehicles table
                 var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.DeviceNum == id);
                 if (vehicle == null)
                 {
@@ -324,7 +326,7 @@ namespace API.Controllers
                 vehicle.Battery = batt;
                 vehicle.GpsTime = gpsDateTime;
                 vehicle.UpdateTime = DateTime.UtcNow;
-                vehicle.Status = "Online";
+                vehicle.Status = "ACC ON,LBS";
                 
                 var gpsDevice = await _db.GPSDevices.FirstOrDefaultAsync(g => g.Imei == id);
                 if (gpsDevice == null)
@@ -343,10 +345,8 @@ namespace API.Controllers
                 else
                 {
                     gpsDevice.Status = Domain.Enums.DeviceStatus.Online;
-                    if (batt > 0)
-                    {
-                        gpsDevice.BatteryLevel = (int)batt;
-                    }
+                    gpsDevice.BatteryLevel = batt > 0 ? (int)batt : 100;
+                    gpsDevice.UpdatedOn = DateTime.UtcNow;
                     _db.GPSDevices.Update(gpsDevice);
                 }
 

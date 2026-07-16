@@ -55,7 +55,9 @@ namespace Application.Assets.Queries
                          asset.ManufacturerId,
                          asset.SiteId,
                          asset.ZoneId,
-                         asset.WarehouseId
+                         asset.WarehouseId,
+                         asset.LocationId,
+                         asset.Location != null ? asset.Location.Name : null
                      );
         }
     }

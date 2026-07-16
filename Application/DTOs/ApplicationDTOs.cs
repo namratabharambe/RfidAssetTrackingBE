@@ -48,7 +48,17 @@ namespace Application.DTOs
     public record ZoneDto(Guid Id, string Code, string Name, string? Description, Guid WarehouseId, string WarehouseName);
     public record CreateZoneDto(string Code, string Name, string? Description, Guid WarehouseId);
 
-    public record LocationDto(Guid Id, string Code, string Name, Guid ZoneId, string ZoneName, decimal? Latitude, decimal? Longitude);
+    public record LocationDto
+    {
+        public Guid Id { get; init; }
+        public string Code { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
+        public Guid ZoneId { get; init; }
+        public string ZoneName { get; init; } = string.Empty;
+        public string? WarehouseName { get; init; }
+        public decimal? Latitude { get; init; }
+        public decimal? Longitude { get; init; }
+    }
     public record CreateLocationDto(string Code, string Name, Guid ZoneId, decimal? Latitude, decimal? Longitude);
 
     // Asset Traceability DTOs
@@ -91,13 +101,45 @@ namespace Application.DTOs
     public record CreateHandheldDeviceDto(string Name, string DeviceSerial, string? Model, Guid? AssignedUserId);
 
     // Operations DTOs
-    public record AssetAssignmentDto(Guid Id, Guid AssetId, string AssetName, string AssetNumber, Guid AssignedToUserId, string AssignedToUsername, string? CustodianName, DateTime AssignedDate, DateTime? ExpectedReturnDate, DateTime? ActualReturnDate, string? Purpose, string Status, string? Notes);
+    public record AssetAssignmentDto
+    {
+        public Guid Id { get; init; }
+        public Guid AssetId { get; init; }
+        public string AssetName { get; init; } = null!;
+        public string AssetNumber { get; init; } = null!;
+        public Guid AssignedToUserId { get; init; }
+        public string AssignedToUsername { get; init; } = null!;
+        public string? CustodianName { get; init; }
+        public DateTime AssignedDate { get; init; }
+        public DateTime? ExpectedReturnDate { get; init; }
+        public DateTime? ActualReturnDate { get; init; }
+        public string? Purpose { get; init; }
+        public string Status { get; init; } = null!;
+        public string? Notes { get; init; }
+    }
     public record CreateAssetAssignmentDto(Guid AssetId, Guid AssignedToUserId, string? CustodianName, DateTime? ExpectedReturnDate, string? Purpose, string? Notes);
 
     public record AssetTransferDto(Guid Id, Guid AssetId, string AssetName, string AssetNumber, Guid SourceSiteId, string SourceSiteName, Guid DestinationSiteId, string DestinationSiteName, DateTime TransferDate, string Status, Guid RequestedByUserId, string RequestedByUsername, Guid? ApprovedByUserId, string? ApprovedByUsername, string? Remarks);
     public record CreateAssetTransferDto(Guid AssetId, Guid DestinationSiteId, string? Remarks);
 
-    public record AssetMovementDto(Guid Id, Guid AssetId, string AssetName, string AssetNumber, Guid? SourceLocationId, string? SourceLocationName, Guid? DestinationLocationId, string? DestinationLocationName, DateTime MovementDate, string MovementType, Guid? ReaderId, string? ReaderName, Guid? HandheldDeviceId, string? HandheldDeviceName, string? Remarks);
+    public record AssetMovementDto
+    {
+        public Guid Id { get; set; }
+        public Guid AssetId { get; set; }
+        public string AssetName { get; set; } = null!;
+        public string AssetNumber { get; set; } = null!;
+        public Guid? SourceLocationId { get; set; }
+        public string? SourceLocationName { get; set; }
+        public Guid? DestinationLocationId { get; set; }
+        public string? DestinationLocationName { get; set; }
+        public DateTime MovementDate { get; set; }
+        public string MovementType { get; set; } = null!;
+        public Guid? ReaderId { get; set; }
+        public string? ReaderName { get; set; }
+        public Guid? HandheldDeviceId { get; set; }
+        public string? HandheldDeviceName { get; set; }
+        public string? Remarks { get; set; }
+    }
     public record CreateAssetMovementDto(Guid AssetId, Guid? DestinationLocationId, string MovementType, Guid? ReaderId, Guid? HandheldDeviceId, string? Remarks);
 
     // Audit DTOs
@@ -135,7 +177,19 @@ namespace Application.DTOs
     public record UploadScanDto(string EpcCode, string? TidCode, DateTime Timestamp, int Rssi, int AntennaIndex, Guid? ReaderId, Guid? HandheldDeviceId);
 
     // Notification & Alert DTOs
-    public record AlertDto(Guid Id, Guid? AssetId, string? AssetName, string AlertType, string Severity, string Title, string Message, bool IsResolved, DateTime? ResolvedDate, string? ResolvedByUsername);
+    public record AlertDto
+    {
+        public Guid Id { get; init; }
+        public Guid? AssetId { get; init; }
+        public string? AssetName { get; init; }
+        public string AlertType { get; init; } = null!;
+        public string Severity { get; init; } = null!;
+        public string Title { get; init; } = null!;
+        public string Message { get; init; } = null!;
+        public bool IsResolved { get; init; }
+        public DateTime? ResolvedDate { get; init; }
+        public string? ResolvedByUsername { get; init; }
+    }
     public record NotificationDto(Guid Id, string Title, string Message, string Type, bool IsRead, DateTime CreatedDate);
 
     // Settings DTOs

@@ -6,6 +6,7 @@ using Domain.Entities;
 using Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -346,7 +347,13 @@ namespace API.Controllers
     [Route("api/locations")]
     public class LocationsController : CrudControllerBase<Location, LocationDto, CreateLocationDto>
     {
-        public LocationsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+        private readonly Infrastructure.Persistence.Context.AssetTrackingDbContext _ctx;
+
+        public LocationsController(IUnitOfWork unitOfWork, IMapper mapper,
+            Infrastructure.Persistence.Context.AssetTrackingDbContext ctx) : base(unitOfWork, mapper)
+        {
+            _ctx = ctx;
+        }
 
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<LocationDto>>> GetAll(
@@ -355,16 +362,26 @@ namespace API.Controllers
             [FromQuery] string? search = null,
             CancellationToken cancellationToken = default)
         {
-            var repo = UnitOfWork.Repository<Location>();
+            var query = _ctx.Locations
+                .Include(l => l.Zone)
+                    .ThenInclude(z => z.Warehouse)
+                .Where(l => !l.IsDeleted);
+
             var filter = GetSiteFilterExpression();
-            var (items, total) = await repo.GetPagedAsync(
-                page,
-                size,
-                search,
-                filter,
-                null,
-                cancellationToken,
-                x => x.Zone);
+            if (filter != null)
+            {
+                query = query.Where(filter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(l => l.Name.Contains(search) || l.Code.Contains(search));
+
+            int total = await query.CountAsync(cancellationToken);
+            var items = await query
+                .Skip((page - 1) * size)
+                .Take(size)
+                .ToListAsync(cancellationToken);
+
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<LocationDto>>(items));
         }
@@ -372,10 +389,10 @@ namespace API.Controllers
         [HttpGet("{id:guid}")]
         public override async Task<ActionResult<LocationDto>> GetById(Guid id, CancellationToken cancellationToken)
         {
-            var entity = await UnitOfWork.Repository<Location>().GetByIdAsync(
-                id,
-                cancellationToken,
-                x => x.Zone);
+            var entity = await _ctx.Locations
+                .Include(l => l.Zone)
+                    .ThenInclude(z => z.Warehouse)
+                .FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted, cancellationToken);
             if (entity == null) return NotFound();
 
             if (!EnforceSiteRestriction(entity))
@@ -625,5 +642,13 @@ namespace API.Controllers
     public class SettingsController : CrudControllerBase<Settings, SettingsDto, CreateSettingsDto>
     {
         public SettingsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+    }
+
+    [Authorize]
+    [ApiController]
+    [Route("api/scansessions")]
+    public class ScanSessionsController : CrudControllerBase<ScanSession, ScanSessionDto, CreateScanSessionDto>
+    {
+        public ScanSessionsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
     }
 }

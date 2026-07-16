@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Infrastructure.Persistence.Context;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
 using System.Threading;
@@ -38,6 +40,7 @@ namespace Infrastructure.Services
                 {
                     using var scope = _serviceProvider.CreateScope();
                     var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<AssetTrackingDbContext>();
                     
                     var scanEventRepo = unitOfWork.Repository<ScanEvent>();
                     var rfidTagRepo = unitOfWork.Repository<RFIDTag>();
@@ -80,29 +83,139 @@ namespace Infrastructure.Services
                             Guid? originalLocationId = asset.LocationId;
                             Guid? scannedLocationId = asset.LocationId;
                             Guid? destinationLocationId = null;
-                            if (scanEvent.ReaderId != null)
-                            {
-                                var reader = await unitOfWork.Repository<Reader>().GetByIdAsync(scanEvent.ReaderId.Value, stoppingToken);
-                                if (reader != null)
-                                {
-                                    asset.SiteId = reader.SiteId;
-                                    
-                                    // Resolve Location under reader's SiteId
-                                    var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == reader.SiteId, stoppingToken, l => l.Zone.Warehouse);
-                                    var firstLoc = locations.FirstOrDefault();
-                                    if (firstLoc != null)
-                                    {
-                                        scannedLocationId = firstLoc.Id;
-                                    }
-                                }
-                            }
+                             if (scanEvent.ReaderId != null)
+                             {
+                                 var reader = await unitOfWork.Repository<Reader>().GetByIdAsync(scanEvent.ReaderId.Value, stoppingToken);
+                                 if (reader != null)
+                                 {
+                                     asset.SiteId = reader.SiteId;
+                                     
+                                     // Resolve Location under reader's SiteId
+                                     var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == reader.SiteId, stoppingToken, l => l.Zone.Warehouse);
+                                     var firstLoc = locations.FirstOrDefault();
+                                     if (firstLoc != null)
+                                     {
+                                         scannedLocationId = firstLoc.Id;
+                                     }
+
+                                     // Handheld Check-In / Check-Out Assignment Logic:
+                                     if (reader.Direction != null && (reader.Direction.Trim().ToUpperInvariant() == "ENTRY" || reader.Direction.Trim().ToUpperInvariant() == "EXIT"))
+                                     {
+                                         var activeSession = await dbContext.ActiveTruckSessions
+                                             .FirstOrDefaultAsync(s => s.ReaderId == reader.Id && s.SiteId == reader.SiteId, stoppingToken);
+                                         if (activeSession != null)
+                                         {
+                                             string custodianName = "Handheld Operator";
+                                             Driver? driver = null;
+                                             AssetTracking.Rfid.Domain.Entities.Truck? truck = null;
+                                             if (activeSession.DriverId.HasValue)
+                                             {
+                                                 driver = await unitOfWork.Repository<Driver>().GetByIdAsync(activeSession.DriverId.Value, stoppingToken);
+                                             }
+                                             if (activeSession.TruckId.HasValue)
+                                             {
+                                                 truck = await dbContext.Trucks.FirstOrDefaultAsync(t => t.TruckId == activeSession.TruckId.Value, stoppingToken);
+                                             }
+
+                                             if (driver != null && truck != null)
+                                                 custodianName = $"{driver.FullName} (Truck: {truck.TruckNumber})";
+                                             else if (driver != null)
+                                                 custodianName = driver.FullName;
+                                             else if (truck != null)
+                                                 custodianName = $"Truck: {truck.TruckNumber}";
+
+                                             var isCheckout = reader.Direction.Trim().ToUpperInvariant() == "ENTRY";
+
+                                             if (isCheckout)
+                                             {
+                                                 // CHECK-OUT
+                                                 var existingAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                     .GetFilteredAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null, stoppingToken);
+                                                 if (!existingAssignments.Any())
+                                                     {
+                                                      var defaultUser = await dbContext.Users.FirstOrDefaultAsync(stoppingToken);
+                                                      var newAssignment = new AssetAssignment
+                                                      {
+                                                          Id = Guid.NewGuid(),
+                                                          AssetId = asset.Id,
+                                                          AssignedToUserId = defaultUser?.Id ?? Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"), // default user / Admin
+                                                          CustodianName = custodianName,
+                                                          AssignedDate = scanEvent.Timestamp,
+                                                          ExpectedReturnDate = scanEvent.Timestamp.AddDays(1),
+                                                          Status = "Active",
+                                                          Notes = $"Checked out via Handheld Scanner. Reader: {reader.Name}."
+                                                      };
+                                                      await unitOfWork.Repository<AssetAssignment>().AddAsync(newAssignment, stoppingToken);
+
+                                                     asset.Status = AssetStatus.Assigned;
+                                                     asset.SiteId = reader.SiteId;
+                                                     assetRepo.Update(asset);
+                                                 }
+                                             }
+                                             else
+                                             {
+                                                 // CHECK-IN
+                                                 var existingAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                     .GetFilteredAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null, stoppingToken);
+                                                 foreach (var a in existingAssignments)
+                                                 {
+                                                     a.ActualReturnDate = scanEvent.Timestamp;
+                                                     a.Status = "Returned";
+                                                     a.Notes = "Checked in via Handheld Scanner. Status: Found.";
+                                                     unitOfWork.Repository<AssetAssignment>().Update(a);
+                                                 }
+
+                                                 asset.Status = AssetStatus.Available;
+                                                 asset.SiteId = reader.SiteId;
+                                                 assetRepo.Update(asset);
+
+                                                 // Verify other tags checked out by this custodian and mark missing if not scanned
+                                                 var allOpenAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                     .GetFilteredAsync(a => a.ActualReturnDate == null, stoppingToken, a => a.Asset);
+
+                                                 var custodianOpen = allOpenAssignments.Where(a => 
+                                                     a.CustodianName != null && 
+                                                     (a.CustodianName.Contains(custodianName) || 
+                                                      (driver != null && a.CustodianName.Contains(driver.FullName)) || 
+                                                      (truck != null && a.CustodianName.Contains(truck.TruckNumber)))).ToList();
+
+                                                 foreach (var a in custodianOpen)
+                                                 {
+                                                     var assetTag = await rfidTagRepo.GetFilteredAsync(t => t.AssetId == a.AssetId, stoppingToken);
+                                                     var epcCode = assetTag.FirstOrDefault()?.EpcCode;
+                                                     if (epcCode != null)
+                                                     {
+                                                         var scannedInSession = await scanEventRepo.GetFilteredAsync(x => 
+                                                             x.ScanSessionId == scanEvent.ScanSessionId && 
+                                                             x.EpcCode.Replace(" ", "").ToLower() == epcCode.Replace(" ", "").ToLower(), stoppingToken);
+
+                                                         if (!scannedInSession.Any())
+                                                         {
+                                                             a.Status = "Missing";
+                                                             a.Notes = "Not detected during check-in. Status: Missing.";
+                                                             unitOfWork.Repository<AssetAssignment>().Update(a);
+
+                                                             var ass = await assetRepo.GetByIdAsync(a.AssetId, stoppingToken);
+                                                             if (ass != null)
+                                                             {
+                                                                 ass.Status = AssetStatus.Retired; // Missing
+                                                                 assetRepo.Update(ass);
+                                                             }
+                                                         }
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
                             else if (scanEvent.HandheldDeviceId != null)
                             {
                                 var handheld = await unitOfWork.Repository<HandheldDevice>().GetByIdAsync(scanEvent.HandheldDeviceId.Value, stoppingToken);
                                 if (handheld != null)
                                 {
-                                    // Default to Office Shelf location (ID: 019f39bb-a292-7f9e-a894-3252a13b4825)
-                                    scannedLocationId = Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
+                                    // Default to the asset's current location first (so it preserves API updates)
+                                    scannedLocationId = asset.LocationId ?? Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
 
                                     var gpsDevices = await unitOfWork.Repository<GPSDevice>().GetFilteredAsync(g => g.Imei == handheld.DeviceSerial, stoppingToken);
                                     var gpsDevice = gpsDevices.FirstOrDefault();

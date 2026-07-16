@@ -60,6 +60,18 @@ namespace Application.Audits.Commands.ReconcileAudit
                     }
                 }
             }
+            // Resolve SiteId of the scanned Location to update Asset.SiteId correctly
+            Guid? resolvedSiteId = null;
+            if (scannedLocationId.HasValue)
+            {
+                var locs = await _unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Id == scannedLocationId.Value, cancellationToken, l => l.Zone.Warehouse);
+                var loc = locs.FirstOrDefault();
+                if (loc?.Zone?.Warehouse != null)
+                {
+                    resolvedSiteId = loc.Zone.Warehouse.SiteId;
+                }
+            }
+
 
             // Fetch expected items for this audit
             var auditItemRepo = _unitOfWork.Repository<InventoryAuditItem>();
@@ -114,9 +126,9 @@ namespace Application.Audits.Commands.ReconcileAudit
                     var originalLocationId = asset.LocationId;
 
                     // Update asset location to new physical location
-                    if (request.ScannedLocationId.HasValue)
+                    if (scannedLocationId.HasValue)
                     {
-                        asset.SiteId = request.ScannedLocationId;
+                        asset.SiteId = resolvedSiteId;
                         asset.LocationId = scannedLocationId;
                         assetRepo.Update(asset);
 
@@ -125,8 +137,8 @@ namespace Application.Audits.Commands.ReconcileAudit
                         {
                             Id = Guid.NewGuid(),
                             AssetId = asset.Id,
-                            SourceLocationId = originalSiteId,
-                            DestinationLocationId = request.ScannedLocationId,
+                            SourceLocationId = originalLocationId,
+                            DestinationLocationId = scannedLocationId,
                             MovementDate = DateTime.UtcNow,
                             MovementType = "AuditCorrection",
                             Remarks = $"Location corrected automatically via audit run '{audit.Title}'."

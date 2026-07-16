@@ -3,6 +3,8 @@ using Infrastructure.Persistence.Context;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using Infrastructure.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -205,26 +207,116 @@ namespace API.Controllers
 
         [AllowAnonymous]
         [HttpPut("scanInventory")]
-        public async Task<ActionResult> ScanInventory([FromBody] ScanInventoryRequestDto request)
+        public async Task<ActionResult> ScanInventory(
+            [FromBody] ScanInventoryRequestDto request,
+            [FromServices] IHubContext<AssetTrackingHub> hubContext)
         {
             if (request == null || request.rows == null)
-            {
                 return BadRequest("Invalid inventory request");
-            }
 
-            var handheld = await _db.HandheldDevices.FirstOrDefaultAsync();
+            var siteId = request.siteId;
+            var operatorName = request.operatorName ?? "Handheld Operator";
+
+            // 1. Resolve handheld device (first active one)
+            var handheld = await _db.HandheldDevices
+                .FirstOrDefaultAsync(h => !h.IsDeleted);
             Guid? handheldGuid = handheld?.Id;
 
-            var session = await _db.ScanSessions.FirstOrDefaultAsync(s => 
-                s.IsRunning && 
-                s.HandheldDeviceId == handheldGuid);
+            // 2. Resolve location: by name first, then first location in the site
+            Location? resolvedLocation = null;
+
+            // Check if location is not selected or matches "gps" (case-insensitive)
+            bool isGpsLookup = string.IsNullOrWhiteSpace(request.location) || request.location.Equals("gps", StringComparison.OrdinalIgnoreCase);
+
+            if (!isGpsLookup)
+            {
+                var locQuery = request.location.Trim();
+                if (locQuery.Contains(" › "))
+                {
+                    var parts = locQuery.Split(" › ");
+                    locQuery = parts[^1].Trim();
+                }
+
+                resolvedLocation = await _db.Locations
+                    .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
+                    .FirstOrDefaultAsync(l =>
+                        (l.Name.ToLower() == locQuery.ToLower() || l.Code.ToLower() == locQuery.ToLower()) &&
+                        (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId));
+            }
+
+            // Coordinates lookup fallback (decoupled from GPSHistory/GPSDevice tables):
+            double? requestLat = request.latitude;
+            double? requestLon = request.longitude;
+
+            if (resolvedLocation == null && (!requestLat.HasValue || !requestLon.HasValue))
+            {
+                if (!string.IsNullOrWhiteSpace(request.location))
+                {
+                    var gpsMatch = System.Text.RegularExpressions.Regex.Match(request.location, @"GPS\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)");
+                    if (gpsMatch.Success)
+                    {
+                        if (double.TryParse(gpsMatch.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double parsedLat) &&
+                            double.TryParse(gpsMatch.Groups[2].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double parsedLon))
+                        {
+                            requestLat = parsedLat;
+                            requestLon = parsedLon;
+                        }
+                    }
+                }
+            }
+
+            if (resolvedLocation == null && requestLat.HasValue && requestLon.HasValue)
+            {
+                var locations = await _db.Locations
+                    .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
+                    .Where(l => l.Latitude != null && l.Longitude != null && (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId))
+                    .ToListAsync();
+
+                Location? closestLocation = null;
+                double minDistance = double.MaxValue;
+
+                foreach (var loc in locations)
+                {
+                    double latDiff = (double)loc.Latitude!.Value - requestLat.Value;
+                    double lonDiff = (double)loc.Longitude!.Value - requestLon.Value;
+                    double dist = Math.Sqrt(latDiff * latDiff + lonDiff * lonDiff);
+
+                    if (dist < minDistance)
+                    {
+                        minDistance = dist;
+                        closestLocation = loc;
+                    }
+                }
+
+                if (closestLocation != null)
+                {
+                    resolvedLocation = closestLocation;
+                }
+            }
+
+            // Final fallback to first location of the site
+            if (resolvedLocation == null && siteId != Guid.Empty)
+            {
+                resolvedLocation = await _db.Locations
+                    .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
+                    .FirstOrDefaultAsync(l => l.Zone.Warehouse.SiteId == siteId);
+            }
+
+            var resolvedLocationId = resolvedLocation?.Id;
+            var resolvedLocationName = resolvedLocation?.Name ?? request.location;
+
+            // 3. Create or reuse an open scan session for this handheld/site
+            var session = await _db.ScanSessions.FirstOrDefaultAsync(s =>
+                s.IsRunning &&
+                (handheldGuid == null || s.HandheldDeviceId == handheldGuid));
 
             if (session == null)
             {
+                var sessionName = $"{operatorName} – Inventory {DateTime.UtcNow:dd-MMM-yyyy HH:mm}";
                 session = new ScanSession
                 {
                     Id = Guid.NewGuid(),
-                    SessionName = $"Handheld Inventory {DateTime.UtcNow:yyyyMMdd}",
+                    SessionName = sessionName,
                     StartTime = DateTime.UtcNow,
                     HandheldDeviceId = handheldGuid,
                     IsRunning = true,
@@ -233,40 +325,175 @@ namespace API.Controllers
                 _db.ScanSessions.Add(session);
             }
 
+            // 4. Process each scanned EPC
             foreach (var row in request.rows)
             {
                 if (string.IsNullOrWhiteSpace(row.rfid)) continue;
 
-                var scan = new RfidScan
+                var epcClean = row.rfid.Trim();
+
+                // Update asset location by matching RFID tag
+                var tag = await _db.RFIDTags.FirstOrDefaultAsync(t =>
+                    t.EpcCode.ToLower() == epcClean.ToLower() && t.AssetId != null);
+
+                Guid? originalLocationId = null;
+
+                if (tag != null)
+                {
+                    var asset = await _db.Assets.FindAsync(tag.AssetId);
+                    if (asset != null)
+                    {
+                        originalLocationId = asset.LocationId;
+                        if (resolvedLocationId.HasValue)
+                            asset.LocationId = resolvedLocationId;
+                        if (siteId != Guid.Empty)
+                            asset.SiteId = siteId;
+                        _db.Assets.Update(asset);
+
+                        // Save asset movement
+                        var movement = new AssetMovement
+                        {
+                            Id = Guid.NewGuid(),
+                            AssetId = asset.Id,
+                            SourceLocationId = originalLocationId,
+                            DestinationLocationId = resolvedLocationId,
+                            MovementDate = DateTime.UtcNow,
+                            MovementType = "HandheldInventory",
+                            HandheldDeviceId = handheldGuid,
+                            Remarks = $"Scanned at {resolvedLocationName} via Handheld Inventory."
+                        };
+                        _db.AssetMovements.Add(movement);
+
+                        // Reconcile with active audits
+                        var activeAudits = await _db.InventoryAudits
+                            .Where(x => x.Status == Domain.Enums.AuditStatus.InProgress || x.Status == Domain.Enums.AuditStatus.Scheduled)
+                            .ToListAsync();
+
+                        foreach (var audit in activeAudits)
+                        {
+                            var item = await _db.InventoryAuditItems
+                                .FirstOrDefaultAsync(x => x.InventoryAuditId == audit.Id && x.AssetId == asset.Id);
+
+                            if (item != null)
+                            {
+                                if (item.Status != Domain.Enums.AuditItemStatus.Found)
+                                {
+                                    item.Status = Domain.Enums.AuditItemStatus.Found;
+                                    item.ScannedLocationId = resolvedLocationId;
+                                    item.ScannedDate = DateTime.UtcNow;
+                                    item.Notes = $"Auto-detected by ScanInventory PUT endpoint via handheld {handheld?.Name}.";
+                                    _db.InventoryAuditItems.Update(item);
+                                }
+                            }
+                            else
+                            {
+                                var misplacedItem = new InventoryAuditItem
+                                {
+                                    Id = Guid.NewGuid(),
+                                    InventoryAuditId = audit.Id,
+                                    AssetId = asset.Id,
+                                    ExpectedLocationId = originalLocationId,
+                                    ScannedLocationId = resolvedLocationId,
+                                    Status = Domain.Enums.AuditItemStatus.Misplaced,
+                                    ScannedDate = DateTime.UtcNow,
+                                    Notes = $"Misplaced asset auto-detected by ScanInventory PUT endpoint."
+                                };
+                                _db.InventoryAuditItems.Add(misplacedItem);
+                            }
+
+                            if (audit.Status == Domain.Enums.AuditStatus.Scheduled)
+                            {
+                                audit.Status = Domain.Enums.AuditStatus.InProgress;
+                                _db.InventoryAudits.Update(audit);
+                            }
+                        }
+
+                        // Broadcast live scan via SignalR
+                        await hubContext.Clients.All.SendAsync("ReceiveLiveScan", new
+                        {
+                            EpcCode = epcClean,
+                            AssetName = asset.Name,
+                            AssetNumber = asset.AssetNumber,
+                            Timestamp = DateTime.UtcNow,
+                            Rssi = -50,
+                            AntennaIndex = 1,
+                            Location = $"Scanned at {resolvedLocationName} via Handheld Inventory."
+                        });
+                    }
+                }
+
+                // Save raw scan
+                _db.RfidScans.Add(new RfidScan
                 {
                     ScanId = Guid.NewGuid(),
-                    Epc = row.rfid,
+                    Epc = epcClean,
                     Rssi = -50,
                     ReaderId = handheld?.Name ?? "Handheld_C72",
-                    SiteId = request.siteId.ToString(),
+                    SiteId = siteId.ToString(),
                     Timestamp = DateTime.UtcNow,
                     type = "Handheld",
                     CreatedOn = DateTime.UtcNow
-                };
-                _db.RfidScans.Add(scan);
+                });
 
-                var scanEvent = new ScanEvent
+                // Save scan event
+                _db.ScanEvents.Add(new ScanEvent
                 {
                     Id = Guid.NewGuid(),
                     ScanSessionId = session.Id,
-                    EpcCode = row.rfid,
+                    EpcCode = epcClean,
                     Timestamp = DateTime.UtcNow,
                     Rssi = -50,
                     AntennaIndex = 1,
                     HandheldDeviceId = handheldGuid,
-                    Status = Domain.Enums.ScanStatus.Matched,
+                    Status = Domain.Enums.ScanStatus.Processed, // Mark processed so ScanProcessor ignores it
                     CreatedOn = DateTime.UtcNow
-                };
-                _db.ScanEvents.Add(scanEvent);
+                });
             }
 
             await _db.SaveChangesAsync();
-            return Ok(new { success = true });
+            return Ok(new
+            {
+                success = true,
+                resolvedLocation = resolvedLocationName,
+                totalScanned = request.rows.Count,
+                sessionId = session.Id,
+                operator_ = operatorName
+            });
+        }
+
+        [AllowAnonymous]
+        [HttpGet("/api/Equipment")]
+        public async Task<ActionResult> GetEquipmentList()
+        {
+            var assets = await _db.Assets
+                .Include(a => a.AssetCategory)
+                .Include(a => a.Location)
+                .Include(a => a.Site)
+                .Where(a => !a.IsDeleted)
+                .ToListAsync();
+
+            var tags = await _db.RFIDTags
+                .Where(t => !t.IsDeleted && t.AssetId != null)
+                .ToListAsync();
+
+            var result = assets.Select(a =>
+            {
+                var tag = tags.FirstOrDefault(t => t.AssetId == a.Id);
+                return new EquipmentRowDto
+                {
+                    RfidTag = tag?.EpcCode ?? "—",
+                    AssetNumber = a.AssetNumber,
+                    EquipmentName = a.Name,
+                    EquipmentType = a.AssetCategory?.Name ?? "Tools",
+                    location = a.Location?.Name ?? "Pune DC",
+                    status = a.Status.ToString(),
+                    site = a.Site?.Name ?? "Pune DC",
+                    barcodeNumber = a.QrCode ?? "—",
+                    imageUrl = ""
+                };
+            }).ToList();
+
+            return Ok(result);
         }
 
         [AllowAnonymous]
@@ -458,6 +685,9 @@ namespace API.Controllers
     {
         public string location { get; set; } = null!;
         public Guid siteId { get; set; }
+        public string? operatorName { get; set; }
+        public double? latitude { get; set; }
+        public double? longitude { get; set; }
         public List<ScanInventoryRowDto> rows { get; set; } = new();
     }
 

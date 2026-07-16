@@ -43,6 +43,12 @@ namespace Infrastructure.Persistence.Configurations
                 .WithMany()
                 .HasForeignKey(x => x.HandheldDeviceId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            builder.Navigation(x => x.Asset).AutoInclude();
+            builder.Navigation(x => x.SourceLocation).AutoInclude();
+            builder.Navigation(x => x.DestinationLocation).AutoInclude();
+            builder.Navigation(x => x.Reader).AutoInclude();
+            builder.Navigation(x => x.HandheldDevice).AutoInclude();
         }
     }
 }
