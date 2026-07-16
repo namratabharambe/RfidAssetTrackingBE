@@ -419,7 +419,7 @@ namespace API.Controllers
 
         [HttpPost("/api/admin/users/save-driver")]
         [AllowAnonymous]
-        public async Task<ActionResult> SaveDriver([FromBody] SaveDriverRequest request)
+        public async Task<ActionResult> SaveDriver([FromBody] RfidSaveDriverRequest request)
         {
             try
             {
@@ -447,7 +447,7 @@ namespace API.Controllers
         }
     }
 
-    public class SaveDriverRequest
+    public class RfidSaveDriverRequest
     {
         public string FullName { get; set; } = null!;
         public string Type { get; set; } = null!;

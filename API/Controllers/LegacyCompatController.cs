@@ -79,7 +79,7 @@ namespace API.Controllers
 
         [AllowAnonymous]
         [HttpPost("api/admin/users/save-driver")]
-        public async Task<IActionResult> SaveDriver([FromBody] SaveDriverRequest request, [FromServices] AppDbContext db)
+        public async Task<IActionResult> SaveDriver([FromBody] LegacySaveDriverRequest request, [FromServices] AppDbContext db)
         {
             if (string.IsNullOrEmpty(request.fullName))
             {
@@ -668,7 +668,7 @@ namespace API.Controllers
         public string password { get; set; } = null!;
     }
 
-    public class SaveDriverRequest
+    public class LegacySaveDriverRequest
     {
         public string fullName { get; set; } = null!;
         public string type { get; set; } = null!;
