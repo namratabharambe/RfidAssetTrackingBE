@@ -33,41 +33,82 @@ namespace API.Controllers
             Guid? readerGuid = null;
             Guid? handheldGuid = null;
 
-            string resolvedReaderId = batch.ReaderId ?? batch.DeviceId ?? "";
-
-            if (Guid.TryParse(resolvedReaderId, out var parsedGuid))
+            // Resolve Reader
+            if (!string.IsNullOrEmpty(batch.ReaderId))
             {
-                var readerExists = await _db.Readers.AnyAsync(r => r.Id == parsedGuid);
-                if (readerExists)
+                if (Guid.TryParse(batch.ReaderId, out var parsedReaderGuid))
                 {
-                    readerGuid = parsedGuid;
-                }
-                else
-                {
-                    var handheldExists = await _db.HandheldDevices.AnyAsync(h => h.Id == parsedGuid);
-                    if (handheldExists)
+                    if (await _db.Readers.AnyAsync(r => r.Id == parsedReaderGuid))
                     {
-                        handheldGuid = parsedGuid;
+                        readerGuid = parsedReaderGuid;
+                    }
+                }
+                if (readerGuid == null)
+                {
+                    var reader = await _db.Readers.FirstOrDefaultAsync(r => r.Name == batch.ReaderId || r.IpAddress == batch.ReaderId);
+                    if (reader != null)
+                    {
+                        readerGuid = reader.Id;
                     }
                 }
             }
-            else
+
+            // Resolve Handheld Device
+            if (!string.IsNullOrEmpty(batch.DeviceId))
             {
-                // Try looking up by serial or ip or name
-                var reader = await _db.Readers.FirstOrDefaultAsync(r => r.IpAddress == resolvedReaderId || r.Name == resolvedReaderId);
-                if (reader != null)
+                if (Guid.TryParse(batch.DeviceId, out var parsedHandheldGuid))
                 {
-                    readerGuid = reader.Id;
+                    if (await _db.HandheldDevices.AnyAsync(h => h.Id == parsedHandheldGuid))
+                    {
+                        handheldGuid = parsedHandheldGuid;
+                    }
                 }
-                else
+                if (handheldGuid == null)
                 {
-                    var handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.DeviceSerial == resolvedReaderId || h.Name == resolvedReaderId);
+                    var handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.DeviceSerial == batch.DeviceId || h.Name == batch.DeviceId);
                     if (handheld != null)
                     {
                         handheldGuid = handheld.Id;
                     }
                 }
             }
+
+            // Fallback for older clients sending only one identifier in either ReaderId or DeviceId
+            if (readerGuid == null && handheldGuid == null)
+            {
+                string fallbackId = batch.ReaderId ?? batch.DeviceId ?? "";
+                if (!string.IsNullOrEmpty(fallbackId))
+                {
+                    if (Guid.TryParse(fallbackId, out var parsedGuid))
+                    {
+                        if (await _db.Readers.AnyAsync(r => r.Id == parsedGuid))
+                        {
+                            readerGuid = parsedGuid;
+                        }
+                        else if (await _db.HandheldDevices.AnyAsync(h => h.Id == parsedGuid))
+                        {
+                            handheldGuid = parsedGuid;
+                        }
+                    }
+                    else
+                    {
+                        var reader = await _db.Readers.FirstOrDefaultAsync(r => r.IpAddress == fallbackId || r.Name == fallbackId);
+                        if (reader != null)
+                        {
+                            readerGuid = reader.Id;
+                        }
+                        else
+                        {
+                            var handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.DeviceSerial == fallbackId || h.Name == fallbackId);
+                            if (handheld != null)
+                            {
+                                handheldGuid = handheld.Id;
+                            }
+                        }
+                    }
+                }
+            }
+
 
             // 2. Fetch or create a ScanSession if we found a valid reader/handheld
             Guid? sessionId = null;
@@ -94,6 +135,8 @@ namespace API.Controllers
                 sessionId = session.Id;
             }
 
+            string resolvedReaderId = batch.ReaderId ?? batch.DeviceId ?? "";
+
             // 3. Save RfidScan records and generate ScanEvents
             foreach (var e in batch.Events)
             {
@@ -106,7 +149,7 @@ namespace API.Controllers
                     Rssi = e.Rssi,
                     ReaderId = resolvedReaderId,
                     SiteId = batch.SiteId,
-                    Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp,
+                    Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime(),
                     type = e.type,
                     CreatedOn = DateTime.UtcNow
                 };
@@ -119,7 +162,7 @@ namespace API.Controllers
                         Id = Guid.NewGuid(),
                         ScanSessionId = sessionId.Value,
                         EpcCode = e.Epc,
-                        Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp,
+                        Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime(),
                         Rssi = (int)e.Rssi,
                         AntennaIndex = 1,
                         ReaderId = readerGuid,

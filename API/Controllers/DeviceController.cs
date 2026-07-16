@@ -239,6 +239,35 @@ namespace API.Controllers
             return Ok(new { Message = "Scan session ended." });
         }
 
+        [HttpGet("sessions")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
+        {
+            var sessionRepo = _unitOfWork.Repository<ScanSession>();
+            var sessions = await sessionRepo.GetFilteredAsync(
+                s => s.HandheldDeviceId != null,
+                cancellationToken,
+                s => s.HandheldDevice.AssignedUser,
+                s => s.ScanEvents);
+
+            var result = sessions.Select(s => new
+            {
+                Id = s.Id.ToString(),
+                Operator = s.HandheldDevice?.AssignedUser?.Username ?? "Admin",
+                Model = s.HandheldDevice?.Model ?? s.HandheldDevice?.Name ?? "C72 Handheld",
+                Type = s.SessionName.Contains("Return") ? "Individual Return" : "Cycle Count",
+                StartTime = s.StartTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                Duration = s.EndTime.HasValue 
+                    ? $"{(s.EndTime.Value - s.StartTime).Minutes}m {(s.EndTime.Value - s.StartTime).Seconds}s"
+                    : "Running",
+                ScannedTags = s.ScanEvents.Count,
+                Discrepancies = s.ScanEvents.Count(e => e.Status == ScanStatus.Unknown),
+                Status = s.IsRunning ? "In Progress" : "Completed"
+            }).OrderByDescending(s => s.StartTime).ToList();
+
+            return Ok(result);
+        }
+
         [HttpGet("config")]
         [AllowAnonymous]
         public IActionResult GetConfig()

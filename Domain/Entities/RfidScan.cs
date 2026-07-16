@@ -16,5 +16,6 @@ namespace Domain.Entities
         public string SiteId { get; set; } = null!;
         public DateTime Timestamp { get; set; }
         public string type { get; set; } = null!;
+        public DateTime? ProcessedAt { get; set; }
     }
 }

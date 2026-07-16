@@ -80,7 +80,8 @@ namespace Infrastructure.Persistence.Context
                     Email = "trackit@prosper.com",
                     PasswordHash = hashStr,
                     PasswordSalt = saltStr,
-                    IsActive = true
+                    IsActive = true,
+                    SiteId = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91")
                 };
 
                 await context.Users.AddAsync(adminUser);
@@ -171,6 +172,22 @@ namespace Infrastructure.Persistence.Context
                 var bengaluruWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c94"), Code = "BLR-WH-1", Name = "Bengaluru Whse", SiteId = bengaluru.Id };
 
                 await context.Warehouses.AddRangeAsync(puneWh, mumbaiWh, chennaiWh, bengaluruWh);
+                await context.SaveChangesAsync();
+            }
+
+            // 5. Seed default Handheld Device
+            if (!await context.HandheldDevices.AnyAsync())
+            {
+                var handheld = new HandheldDevice
+                {
+                    Id = Guid.Parse("f3a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c71"),
+                    Name = "HH-01",
+                    DeviceSerial = "HC72BC250900278",
+                    Model = "Chainway C72",
+                    Status = DeviceStatus.Online,
+                    CreatedOn = DateTime.UtcNow
+                };
+                await context.HandheldDevices.AddAsync(handheld);
                 await context.SaveChangesAsync();
             }
         }

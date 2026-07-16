@@ -255,6 +255,44 @@ namespace API.Controllers
     public class WarehousesController : CrudControllerBase<Warehouse, WarehouseDto, CreateWarehouseDto>
     {
         public WarehousesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<WarehouseDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Warehouse>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Site);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<WarehouseDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<WarehouseDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<Warehouse>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Site);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<WarehouseDto>(entity));
+        }
     }
 
     [Authorize]
@@ -263,6 +301,44 @@ namespace API.Controllers
     public class ZonesController : CrudControllerBase<Zone, ZoneDto, CreateZoneDto>
     {
         public ZonesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<ZoneDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Zone>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Warehouse);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<ZoneDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<ZoneDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<Zone>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Warehouse);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<ZoneDto>(entity));
+        }
     }
 
     [Authorize]
@@ -271,6 +347,44 @@ namespace API.Controllers
     public class LocationsController : CrudControllerBase<Location, LocationDto, CreateLocationDto>
     {
         public LocationsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<LocationDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Location>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Zone);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<LocationDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<LocationDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<Location>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Zone);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<LocationDto>(entity));
+        }
     }
 
     [Authorize]
@@ -337,6 +451,46 @@ namespace API.Controllers
     public class AssetAssignmentsController : CrudControllerBase<AssetAssignment, AssetAssignmentDto, CreateAssetAssignmentDto>
     {
         public AssetAssignmentsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<AssetAssignmentDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<AssetAssignment>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Asset,
+                x => x.AssignedToUser);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<AssetAssignmentDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<AssetAssignmentDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<AssetAssignment>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Asset,
+                x => x.AssignedToUser);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<AssetAssignmentDto>(entity));
+        }
     }
 
     [Authorize]
@@ -345,6 +499,52 @@ namespace API.Controllers
     public class AssetTransfersController : CrudControllerBase<AssetTransfer, AssetTransferDto, CreateAssetTransferDto>
     {
         public AssetTransfersController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<AssetTransferDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<AssetTransfer>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Asset,
+                x => x.SourceSite,
+                x => x.DestinationSite,
+                x => x.RequestedByUser,
+                x => x.ApprovedByUser);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<AssetTransferDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<AssetTransferDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<AssetTransfer>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Asset,
+                x => x.SourceSite,
+                x => x.DestinationSite,
+                x => x.RequestedByUser,
+                x => x.ApprovedByUser);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<AssetTransferDto>(entity));
+        }
     }
 
     [Authorize]
@@ -353,6 +553,52 @@ namespace API.Controllers
     public class AssetMovementsController : CrudControllerBase<AssetMovement, AssetMovementDto, CreateAssetMovementDto>
     {
         public AssetMovementsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<AssetMovementDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<AssetMovement>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Asset,
+                x => x.SourceLocation,
+                x => x.DestinationLocation,
+                x => x.Reader,
+                x => x.HandheldDevice);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<AssetMovementDto>>(items));
+        }
+
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<AssetMovementDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var entity = await UnitOfWork.Repository<AssetMovement>().GetByIdAsync(
+                id,
+                cancellationToken,
+                x => x.Asset,
+                x => x.SourceLocation,
+                x => x.DestinationLocation,
+                x => x.Reader,
+                x => x.HandheldDevice);
+            if (entity == null) return NotFound();
+
+            if (!EnforceSiteRestriction(entity))
+            {
+                return NotFound();
+            }
+
+            return Ok(Mapper.Map<AssetMovementDto>(entity));
+        }
     }
 
 

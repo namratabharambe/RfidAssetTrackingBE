@@ -48,11 +48,40 @@ public class AssetTrackingDbContext : DbContext
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<RfidScan> RfidScans => Set<RfidScan>();
 
+    // Custom RFID Processing entities
+    public DbSet<AssetTracking.Rfid.Domain.Entities.RfidTag> CustomRfidTags => Set<AssetTracking.Rfid.Domain.Entities.RfidTag>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.Truck> Trucks => Set<AssetTracking.Rfid.Domain.Entities.Truck>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.Equipment> Equipment => Set<AssetTracking.Rfid.Domain.Entities.Equipment>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.GateEvent> GateEvents => Set<AssetTracking.Rfid.Domain.Entities.GateEvent>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.GateEventItem> GateEventItems => Set<AssetTracking.Rfid.Domain.Entities.GateEventItem>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.ActiveTruckSession> ActiveTruckSessions => Set<AssetTracking.Rfid.Domain.Entities.ActiveTruckSession>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.TruckEquipmentAssignment> TruckEquipmentAssignments => Set<AssetTracking.Rfid.Domain.Entities.TruckEquipmentAssignment>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCase> MissingEquipmentCases => Set<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCase>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCaseItem> MissingEquipmentCaseItems => Set<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCaseItem>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.MissingEquipmentStatus> MissingEquipmentStatuses => Set<AssetTracking.Rfid.Domain.Entities.MissingEquipmentStatus>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.MissingEquipmentSeverity> MissingEquipmentSeverities => Set<AssetTracking.Rfid.Domain.Entities.MissingEquipmentSeverity>();
+    public DbSet<AssetTracking.Rfid.Domain.Entities.Alert> RfidAlerts => Set<AssetTracking.Rfid.Domain.Entities.Alert>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AssetTrackingDbContext).Assembly);
 
         base.OnModelCreating(modelBuilder);
+
+        // Map custom RFID entities
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.Alert>().ToTable("RfidAlerts");
+
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.RfidTag>().HasKey(t => t.RfidTagId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.Truck>().HasKey(t => t.TruckId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.Equipment>().HasKey(e => e.EquipmentId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.GateEvent>().HasKey(g => g.GateEventId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.GateEventItem>().HasKey(gi => gi.GateEventItemId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.ActiveTruckSession>().HasKey(a => a.Id);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.TruckEquipmentAssignment>().HasKey(a => a.AssignmentId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCase>().HasKey(c => c.MissingEquipmentCaseId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentCaseItem>().HasKey(ci => ci.MissingEquipmentCaseItemId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentStatus>().HasKey(s => s.StatusId);
+        modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentSeverity>().HasKey(s => s.SeverityId);
     }
 }
 

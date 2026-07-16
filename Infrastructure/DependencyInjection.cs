@@ -29,9 +29,13 @@ namespace Infrastructure
             services.AddScoped<IDashboardService, DashboardService>();
             services.AddScoped<IReportService, ReportService>();
 
+            services.AddScoped<AssetTracking.Rfid.Infrastructure.Persistence.AppDbContext>();
+            services.AddScoped<AssetTracking.Rfid.ScanProcessor.ScanDataProcessorFunction>();
+
             services.AddHostedService<ReaderHealthMonitor>();
             services.AddHostedService<GPSProcessor>();
             services.AddHostedService<ScanProcessor>();
+            services.AddHostedService<ScanDataProcessorBackgroundService>();
 
             return services;
         }

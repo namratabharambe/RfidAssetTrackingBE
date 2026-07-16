@@ -15,7 +15,7 @@ namespace Infrastructure.Persistence.Context
                 new DbContextOptionsBuilder<AssetTrackingDbContext>();
 
             optionsBuilder.UseNpgsql(
-                   "Host=localhost;Port=5432;Database=AssetTrackingDb;Username=postgres;Password=postgres");
+                   "Host=localhost;Port=5432;Database=AssetTrackingDb;Username=postgres;Password=root");
 
             return new AssetTrackingDbContext(optionsBuilder.Options);
         }

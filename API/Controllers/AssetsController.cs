@@ -1,4 +1,4 @@
-﻿using Application.Assets.Commands.CreateAsset;
+using Application.Assets.Commands.CreateAsset;
 using Application.Assets.Commands.DeleteAsset;
 using Application.Assets.Commands.UpdateAsset;
 using Application.Assets.Queries;
@@ -41,6 +41,18 @@ namespace API.Controllers
         public async Task<Guid> Create(CreateAssetCommand command)
         {
             return await _mediator.Send(command);
+        }
+
+        [HttpPost("bulk")]
+        public async Task<IActionResult> BulkCreate([FromBody] IEnumerable<CreateAssetCommand> commands)
+        {
+            var createdIds = new List<Guid>();
+            foreach (var command in commands)
+            {
+                var id = await _mediator.Send(command);
+                createdIds.Add(id);
+            }
+            return Ok(new { count = createdIds.Count, ids = createdIds });
         }
 
         [HttpPut("{id:guid}")]

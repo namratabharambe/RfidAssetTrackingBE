@@ -72,9 +72,15 @@ namespace Infrastructure.Persistence.Repositories
             string? searchTerm,
             Expression<Func<T, bool>>? filterExpression,
             Func<IQueryable<T>, IOrderedQueryable<T>>? orderBy,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            params Expression<Func<T, object>>[] includes)
         {
             IQueryable<T> query = DbSet.Where(x => !x.IsDeleted);
+
+            foreach (var include in includes)
+            {
+                query = query.Include(include);
+            }
 
             if (filterExpression != null)
             {

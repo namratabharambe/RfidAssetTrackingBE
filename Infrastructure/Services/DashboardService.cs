@@ -45,14 +45,14 @@ namespace Infrastructure.Services
                 ));
             }
 
-            var readers = await _context.Readers.Where(x => !x.IsDeleted).Include(r => r.Site).Take(5).ToListAsync(cancellationToken);
+            var readers = await _context.Readers.Where(x => !x.IsDeleted).Include(r => r.Site).ToListAsync(cancellationToken);
             var readerStatuses = readers.Select(r => new ReaderStatusDto(
                 r.Name,
                 r.Site.Name,
                 r.Status.ToString()
             )).ToList();
 
-            var gpsDevices = await _context.GPSDevices.Where(x => !x.IsDeleted).Include(g => g.Asset).Take(5).ToListAsync(cancellationToken);
+            var gpsDevices = await _context.GPSDevices.Where(x => !x.IsDeleted).Include(g => g.Asset).ToListAsync(cancellationToken);
             var gpsStatuses = gpsDevices.Select(g => new GPSDeviceStatusDto(
                 g.Imei,
                 g.Asset != null ? g.Asset.Name : "Unassigned",
@@ -63,7 +63,6 @@ namespace Infrastructure.Services
             var movements = await _context.AssetMovements.Where(x => !x.IsDeleted)
                 .Include(m => m.Asset)
                 .OrderByDescending(m => m.MovementDate)
-                .Take(5)
                 .ToListAsync(cancellationToken);
                 
             var recentActivity = movements.Select(m => new ActivityLogDto(
@@ -75,7 +74,6 @@ namespace Infrastructure.Services
             var alerts = await _context.Alerts.Where(x => !x.IsDeleted && !x.IsResolved)
                 .Include(a => a.Asset)
                 .OrderByDescending(a => a.CreatedOn)
-                .Take(5)
                 .ToListAsync(cancellationToken);
 
             var activeAlerts = alerts.Select(a => new AlertDto(

@@ -23,6 +23,7 @@ namespace Application.Interfaces
             string? searchTerm,
             Expression<Func<T, bool>>? filterExpression,
             Func<IQueryable<T>, IOrderedQueryable<T>>? orderBy,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            params Expression<Func<T, object>>[] includes);
     }
 }
