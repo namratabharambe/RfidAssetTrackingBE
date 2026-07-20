@@ -444,32 +444,53 @@ namespace API.Controllers
                     });
                 }
 
-                // ── Also pull checkouts from AssetAssignments created by ScanProcessor (ReaderId scan) ──
-                // ScanProcessor sets CustodianName = "<driverName>" or "<driverName> (Truck: <truckNumber>)"
+                // ── Pull checkouts from AssetMovements where Reader.Direction = "EXIT" for this driver ──
                 if (!string.IsNullOrEmpty(driverName))
                 {
-                    var rfidCheckouts = await db.AssetAssignments
-                        .Include(a => a.Asset)
-                        .Where(a => a.ActualReturnDate == null
-                                 && a.Status == "Active"
-                                 && a.CustodianName != null
+                    // Step 1: Get all AssetIds linked to this driver via CustodianName
+                    var driverAssetIds = await db.AssetAssignments
+                        .Where(a => a.CustodianName != null
                                  && a.CustodianName.ToLower().Contains(driverName.ToLower()))
+                        .Select(a => a.AssetId)
+                        .Distinct()
                         .ToListAsync();
 
-                    foreach (var a in rfidCheckouts)
+                    // Step 2: Get readers with Direction = EXIT
+                    var exitReaderIds = await db.Readers
+                        .Where(r => r.Direction != null && r.Direction.ToUpper() == "EXIT")
+                        .Select(r => r.Id)
+                        .ToListAsync();
+
+                    // Step 3: Get AssetMovements for those assets via EXIT readers
+                    var exitMovements = await db.AssetMovements
+                        .Include(m => m.Asset)
+                        .Where(m => m.ReaderId != null
+                                 && exitReaderIds.Contains(m.ReaderId.Value)
+                                 && driverAssetIds.Contains(m.AssetId))
+                        .OrderByDescending(m => m.MovementDate)
+                        .ToListAsync();
+
+                    // Track already-added assetIds to avoid duplicates
+                    var addedCheckoutIds = new System.Collections.Generic.HashSet<string>();
+
+                    foreach (var m in exitMovements)
                     {
-                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.AssetId);
-                        if (lastCheckoutTime == null || a.AssignedDate > lastCheckoutTime)
-                            lastCheckoutTime = a.AssignedDate;
+                        var key = m.AssetId.ToString();
+                        if (addedCheckoutIds.Contains(key)) continue;
+                        addedCheckoutIds.Add(key);
+
+                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                        if (lastCheckoutTime == null || m.MovementDate > lastCheckoutTime)
+                            lastCheckoutTime = m.MovementDate;
 
                         checkoutTable.Add(new
                         {
-                            equipment = a.Asset?.Name ?? "Unknown Equipment",
+                            equipment = m.Asset?.Name ?? "Unknown Equipment",
                             tagName = rfidTag?.EpcCode ?? "",
-                            equipmentType = "RFID_SCAN",
+                            equipmentType = "RFID_CHECKOUT",
                             detected = "Yes",
-                            checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
-                            equipmentId = a.AssetId.ToString()
+                            checkOutDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                            equipmentId = m.AssetId.ToString()
                         });
                     }
                 }
@@ -507,33 +528,47 @@ namespace API.Controllers
                     totalDetected++;
                 }
 
-                // ── Also pull returned AssetAssignments for this driver (RFID check-in via ReaderId) ──
+                // ── Pull check-ins from AssetMovements where Reader.Direction = "ENTRY" for this driver ──
                 if (!string.IsNullOrEmpty(driverName))
                 {
-                    var rfidCheckins = await db.AssetAssignments
-                        .Include(a => a.Asset)
-                        .Where(a => a.ActualReturnDate != null
-                                 && a.Status == "Returned"
-                                 && a.CustodianName != null
+                    // Step 1: Get AssetIds linked to this driver
+                    var driverCheckinAssetIds = await db.AssetAssignments
+                        .Where(a => a.CustodianName != null
                                  && a.CustodianName.ToLower().Contains(driverName.ToLower()))
-                        .OrderByDescending(a => a.ActualReturnDate)
+                        .Select(a => a.AssetId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    // Step 2: Get readers with Direction = ENTRY
+                    var entryReaderIds = await db.Readers
+                        .Where(r => r.Direction != null && r.Direction.ToUpper() == "ENTRY")
+                        .Select(r => r.Id)
+                        .ToListAsync();
+
+                    // Step 3: Get AssetMovements for those assets via ENTRY readers
+                    var entryMovements = await db.AssetMovements
+                        .Include(m => m.Asset)
+                        .Where(m => m.ReaderId != null
+                                 && entryReaderIds.Contains(m.ReaderId.Value)
+                                 && driverCheckinAssetIds.Contains(m.AssetId))
+                        .OrderByDescending(m => m.MovementDate)
                         .Take(10)
                         .ToListAsync();
 
-                    foreach (var a in rfidCheckins)
+                    foreach (var m in entryMovements)
                     {
-                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.AssetId);
-                        if (lastCheckinTime == null || a.ActualReturnDate > lastCheckinTime)
-                            lastCheckinTime = a.ActualReturnDate;
+                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                        if (lastCheckinTime == null || m.MovementDate > lastCheckinTime)
+                            lastCheckinTime = m.MovementDate;
 
                         checkinTable.Add(new
                         {
-                            equipment = a.Asset?.Name ?? "Unknown Equipment",
+                            equipment = m.Asset?.Name ?? "Unknown Equipment",
                             tagName = rfidTag?.EpcCode ?? "",
-                            equipmentType = "RFID_SCAN",
+                            equipmentType = "RFID_CHECKIN",
                             gateStatus = "Matched",
-                            equipmentId = a.AssetId.ToString(),
-                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
+                            equipmentId = m.AssetId.ToString(),
+                            checkInDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss")
                         });
                         totalDetected++;
                     }
