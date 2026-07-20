@@ -403,201 +403,201 @@ namespace API.Controllers
         [HttpGet("api/Trucks/complete-status")]
         public async Task<IActionResult> GetCompleteStatus([FromServices] AppDbContext db)
         {
-            var trucks = await db.Trucks.ToListAsync();
+            // ── Pre-load all readers by direction ───────────────────────────────────
+            var exitReaderIds = await db.Readers
+                .Where(r => r.Direction != null && r.Direction.ToUpper() == "EXIT")
+                .Select(r => r.Id)
+                .ToListAsync();
+
+            var entryReaderIds = await db.Readers
+                .Where(r => r.Direction != null && r.Direction.ToUpper() == "ENTRY")
+                .Select(r => r.Id)
+                .ToListAsync();
+
+            // ── All EXIT movements (checkout) ────────────────────────────────────────
+            var allExitMovements = await db.AssetMovements
+                .Include(m => m.Asset)
+                .Where(m => m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value))
+                .OrderByDescending(m => m.MovementDate)
+                .ToListAsync();
+
+            // ── All ENTRY movements (checkin) ────────────────────────────────────────
+            var allEntryMovements = await db.AssetMovements
+                .Include(m => m.Asset)
+                .Where(m => m.ReaderId != null && entryReaderIds.Contains(m.ReaderId.Value))
+                .OrderByDescending(m => m.MovementDate)
+                .Take(50)
+                .ToListAsync();
+
+            // ── Build result per Driver ──────────────────────────────────────────────
+            var drivers = await db.Drivers.ToListAsync();
             var resultTrucks = new List<object>();
 
-            foreach (var t in trucks)
-            {
-                string? driverName = null;
-                if (t.DriverId != null)
-                {
-                    var driver = await db.Drivers.FindAsync(t.DriverId.Value);
-                    driverName = driver?.FullName;
-                }
+            // Also handle trucks if they exist
+            var trucks = await db.Trucks.Include(t => t.RfidTag).ToListAsync();
 
-                var activeAssignments = await db.TruckEquipmentAssignments
-                    .Where(a => a.TruckId == t.TruckId && a.ReturnedAt == null)
+            // Build driver list — from Drivers table + any truck-linked drivers
+            var processedDriverIds = new System.Collections.Generic.HashSet<Guid>();
+
+            foreach (var driver in drivers)
+            {
+                if (processedDriverIds.Contains(driver.Id)) continue;
+                processedDriverIds.Add(driver.Id);
+
+                // Get ReaderIds this driver is currently active on via ActiveTruckSessions
+                var driverSessionReaderIds = await db.ActiveTruckSessions
+                    .Where(s => s.DriverId == driver.Id && s.ReaderId != Guid.Empty)
+                    .Select(s => s.ReaderId)
+                    .Distinct()
                     .ToListAsync();
 
+                // ── CHECKOUT TABLE: EXIT reader movements for this driver's session ──
                 var checkoutTable = new List<object>();
                 DateTime? lastCheckoutTime = null;
+                var addedCheckoutIds = new System.Collections.Generic.HashSet<string>();
 
-                foreach (var a in activeAssignments)
+                IEnumerable<AssetMovement> exitMovements = allExitMovements
+                    .Where(m => m.ReaderId != null && driverSessionReaderIds.Contains(m.ReaderId.Value));
+
+                foreach (var m in exitMovements)
                 {
-                    var asset = await db.Assets.FindAsync(a.EquipmentId);
-                    var eq = await db.Equipment.Include(e => e.RfidTag).FirstOrDefaultAsync(e => e.EquipmentId == a.EquipmentId);
-                    var tagName = eq?.RfidTag?.TagName ?? "";
+                    var key = m.AssetId.ToString();
+                    if (addedCheckoutIds.Contains(key)) continue;
+                    addedCheckoutIds.Add(key);
 
-                    if (lastCheckoutTime == null || a.AssignedAt > lastCheckoutTime)
-                    {
-                        lastCheckoutTime = a.AssignedAt;
-                    }
+                    var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                    if (lastCheckoutTime == null || m.MovementDate > lastCheckoutTime)
+                        lastCheckoutTime = m.MovementDate;
 
                     checkoutTable.Add(new
                     {
-                        equipment = asset?.Name ?? "Unknown Equipment",
-                        tagName = tagName,
-                        equipmentType = a.Type ?? "EQUIPMENT",
+                        equipment = m.Asset?.Name ?? m.Asset?.AssetNumber ?? "Unknown Equipment",
+                        tagName = rfidTag?.EpcCode ?? "",
+                        equipmentType = "RFID_CHECKOUT",
                         detected = "Yes",
-                        checkOutDate = a.AssignedAt.ToString("yyyy-MM-dd HH:mm:ss"),
-                        equipmentId = a.EquipmentId.ToString()
+                        checkOutDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                        equipmentId = m.AssetId.ToString()
                     });
                 }
 
-                // ── Pull checkouts from AssetMovements where Reader.Direction = "EXIT" for this driver ──
-                if (!string.IsNullOrEmpty(driverName))
+                // Also pull from TruckEquipmentAssignments if truck linked
+                var linkedTruck = trucks.FirstOrDefault(t => t.DriverId == driver.Id);
+                if (linkedTruck != null)
                 {
-                    // Step 1: Get all AssetIds linked to this driver via CustodianName
-                    var driverAssetIds = await db.AssetAssignments
-                        .Where(a => a.CustodianName != null
-                                 && a.CustodianName.ToLower().Contains(driverName.ToLower()))
-                        .Select(a => a.AssetId)
-                        .Distinct()
+                    var truckAssignments = await db.TruckEquipmentAssignments
+                        .Where(a => a.TruckId == linkedTruck.TruckId && a.ReturnedAt == null)
                         .ToListAsync();
 
-                    // Step 2: Get readers with Direction = EXIT
-                    var exitReaderIds = await db.Readers
-                        .Where(r => r.Direction != null && r.Direction.ToUpper() == "EXIT")
-                        .Select(r => r.Id)
-                        .ToListAsync();
-
-                    // Step 3: Get AssetMovements for those assets via EXIT readers
-                    var exitMovements = await db.AssetMovements
-                        .Include(m => m.Asset)
-                        .Where(m => m.ReaderId != null
-                                 && exitReaderIds.Contains(m.ReaderId.Value)
-                                 && driverAssetIds.Contains(m.AssetId))
-                        .OrderByDescending(m => m.MovementDate)
-                        .ToListAsync();
-
-                    // Track already-added assetIds to avoid duplicates
-                    var addedCheckoutIds = new System.Collections.Generic.HashSet<string>();
-
-                    foreach (var m in exitMovements)
+                    foreach (var a in truckAssignments)
                     {
-                        var key = m.AssetId.ToString();
+                        var key = a.EquipmentId.ToString();
                         if (addedCheckoutIds.Contains(key)) continue;
                         addedCheckoutIds.Add(key);
 
-                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
-                        if (lastCheckoutTime == null || m.MovementDate > lastCheckoutTime)
-                            lastCheckoutTime = m.MovementDate;
+                        var asset = await db.Assets.FindAsync(a.EquipmentId);
+                        var eq = await db.Equipment.Include(e => e.RfidTag)
+                            .FirstOrDefaultAsync(e => e.EquipmentId == a.EquipmentId);
+
+                        if (lastCheckoutTime == null || a.AssignedAt > lastCheckoutTime)
+                            lastCheckoutTime = a.AssignedAt;
 
                         checkoutTable.Add(new
                         {
-                            equipment = m.Asset?.Name ?? "Unknown Equipment",
-                            tagName = rfidTag?.EpcCode ?? "",
-                            equipmentType = "RFID_CHECKOUT",
+                            equipment = asset?.Name ?? "Unknown Equipment",
+                            tagName = eq?.RfidTag?.TagName ?? "",
+                            equipmentType = a.Type ?? "EQUIPMENT",
                             detected = "Yes",
-                            checkOutDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss"),
-                            equipmentId = m.AssetId.ToString()
+                            checkOutDate = a.AssignedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                            equipmentId = a.EquipmentId.ToString()
                         });
                     }
                 }
 
-                var returnedAssignments = await db.TruckEquipmentAssignments
-                    .Where(a => a.TruckId == t.TruckId && a.ReturnedAt != null)
-                    .OrderByDescending(a => a.ReturnedAt)
-                    .Take(10)
-                    .ToListAsync();
-
+                // ── CHECKIN TABLE: ENTRY reader movements for this driver's session ──
                 var checkinTable = new List<object>();
                 DateTime? lastCheckinTime = null;
                 int totalDetected = 0;
 
-                foreach (var a in returnedAssignments)
-                {
-                    var asset = await db.Assets.FindAsync(a.EquipmentId);
-                    var eq = await db.Equipment.Include(e => e.RfidTag).FirstOrDefaultAsync(e => e.EquipmentId == a.EquipmentId);
-                    var tagName = eq?.RfidTag?.TagName ?? "";
+                IEnumerable<AssetMovement> entryMovements = allEntryMovements
+                    .Where(m => m.ReaderId != null && driverSessionReaderIds.Contains(m.ReaderId.Value));
 
-                    if (lastCheckinTime == null || a.ReturnedAt > lastCheckinTime)
-                    {
-                        lastCheckinTime = a.ReturnedAt;
-                    }
+                foreach (var m in entryMovements)
+                {
+                    var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                    if (lastCheckinTime == null || m.MovementDate > lastCheckinTime)
+                        lastCheckinTime = m.MovementDate;
 
                     checkinTable.Add(new
                     {
-                        equipment = asset?.Name ?? "Unknown Equipment",
-                        tagName = tagName,
-                        equipmentType = a.Type ?? "EQUIPMENT",
+                        equipment = m.Asset?.Name ?? m.Asset?.AssetNumber ?? "Unknown Equipment",
+                        tagName = rfidTag?.EpcCode ?? "",
+                        equipmentType = "RFID_CHECKIN",
                         gateStatus = "Matched",
-                        equipmentId = a.EquipmentId.ToString(),
-                        checkInDate = a.ReturnedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
+                        equipmentId = m.AssetId.ToString(),
+                        checkInDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss")
                     });
                     totalDetected++;
                 }
 
-                // ── Pull check-ins from AssetMovements where Reader.Direction = "ENTRY" for this driver ──
-                if (!string.IsNullOrEmpty(driverName))
+                // Also pull returned TruckEquipmentAssignments if truck linked
+                if (linkedTruck != null)
                 {
-                    // Step 1: Get AssetIds linked to this driver
-                    var driverCheckinAssetIds = await db.AssetAssignments
-                        .Where(a => a.CustodianName != null
-                                 && a.CustodianName.ToLower().Contains(driverName.ToLower()))
-                        .Select(a => a.AssetId)
-                        .Distinct()
-                        .ToListAsync();
-
-                    // Step 2: Get readers with Direction = ENTRY
-                    var entryReaderIds = await db.Readers
-                        .Where(r => r.Direction != null && r.Direction.ToUpper() == "ENTRY")
-                        .Select(r => r.Id)
-                        .ToListAsync();
-
-                    // Step 3: Get AssetMovements for those assets via ENTRY readers
-                    var entryMovements = await db.AssetMovements
-                        .Include(m => m.Asset)
-                        .Where(m => m.ReaderId != null
-                                 && entryReaderIds.Contains(m.ReaderId.Value)
-                                 && driverCheckinAssetIds.Contains(m.AssetId))
-                        .OrderByDescending(m => m.MovementDate)
+                    var returnedAssignments = await db.TruckEquipmentAssignments
+                        .Where(a => a.TruckId == linkedTruck.TruckId && a.ReturnedAt != null)
+                        .OrderByDescending(a => a.ReturnedAt)
                         .Take(10)
                         .ToListAsync();
 
-                    foreach (var m in entryMovements)
+                    foreach (var a in returnedAssignments)
                     {
-                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
-                        if (lastCheckinTime == null || m.MovementDate > lastCheckinTime)
-                            lastCheckinTime = m.MovementDate;
+                        var asset = await db.Assets.FindAsync(a.EquipmentId);
+                        var eq = await db.Equipment.Include(e => e.RfidTag)
+                            .FirstOrDefaultAsync(e => e.EquipmentId == a.EquipmentId);
+
+                        if (lastCheckinTime == null || a.ReturnedAt > lastCheckinTime)
+                            lastCheckinTime = a.ReturnedAt;
 
                         checkinTable.Add(new
                         {
-                            equipment = m.Asset?.Name ?? "Unknown Equipment",
-                            tagName = rfidTag?.EpcCode ?? "",
-                            equipmentType = "RFID_CHECKIN",
+                            equipment = asset?.Name ?? "Unknown Equipment",
+                            tagName = eq?.RfidTag?.TagName ?? "",
+                            equipmentType = a.Type ?? "EQUIPMENT",
                             gateStatus = "Matched",
-                            equipmentId = m.AssetId.ToString(),
-                            checkInDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss")
+                            equipmentId = a.EquipmentId.ToString(),
+                            checkInDate = a.ReturnedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
                         });
                         totalDetected++;
                     }
                 }
 
-                var openCases = await db.MissingEquipmentCases
-                    .Include(c => c.Items)
-                    .Where(c => c.TruckId == t.TruckId && c.ClosedAt == null)
-                    .ToListAsync();
-
+                // Missing cases (from MissingEquipmentCases linked to truck)
                 int missingCount = 0;
-                foreach (var c in openCases)
+                if (linkedTruck != null)
                 {
-                    foreach (var item in c.Items.Where(i => !i.IsRecovered))
-                    {
-                        var asset = await db.Assets.FindAsync(item.EquipmentId);
-                        var eq = await db.Equipment.Include(e => e.RfidTag).FirstOrDefaultAsync(e => e.EquipmentId == item.EquipmentId);
-                        var tagName = eq?.RfidTag?.TagName ?? item.Epc;
+                    var openCases = await db.MissingEquipmentCases
+                        .Include(c => c.Items)
+                        .Where(c => c.TruckId == linkedTruck.TruckId && c.ClosedAt == null)
+                        .ToListAsync();
 
-                        checkinTable.Add(new
+                    foreach (var c in openCases)
+                    {
+                        foreach (var item in c.Items.Where(i => !i.IsRecovered))
                         {
-                            equipment = asset?.Name ?? "Unknown Equipment",
-                            tagName = tagName,
-                            equipmentType = "EQUIPMENT",
-                            gateStatus = "Missing",
-                            equipmentId = item.EquipmentId.ToString(),
-                            checkInDate = c.OpenedAt.ToString("yyyy-MM-dd HH:mm:ss")
-                        });
-                        missingCount++;
+                            var asset = await db.Assets.FindAsync(item.EquipmentId);
+                            var eq = await db.Equipment.Include(e => e.RfidTag)
+                                .FirstOrDefaultAsync(e => e.EquipmentId == item.EquipmentId);
+
+                            checkinTable.Add(new
+                            {
+                                equipment = asset?.Name ?? "Unknown Equipment",
+                                tagName = eq?.RfidTag?.TagName ?? item.Epc,
+                                equipmentType = "EQUIPMENT",
+                                gateStatus = "Missing",
+                                equipmentId = item.EquipmentId.ToString(),
+                                checkInDate = c.OpenedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                            });
+                            missingCount++;
+                        }
                     }
                 }
 
@@ -607,9 +607,9 @@ namespace API.Controllers
                 {
                     truck = new
                     {
-                        truckId = t.TruckId.ToString(),
-                        truckNumber = t.TruckNumber,
-                        driver = driverName ?? ""
+                        truckId = linkedTruck?.TruckId.ToString() ?? driver.Id.ToString(),
+                        truckNumber = linkedTruck?.TruckNumber ?? $"Individual-{driver.FullName}",
+                        driver = driver.FullName
                     },
                     checkOut = new
                     {
@@ -630,15 +630,16 @@ namespace API.Controllers
                 });
             }
 
-            var firstSiteId = trucks.FirstOrDefault()?.SiteId.ToString() ?? Guid.Empty.ToString();
+            var firstSiteId = drivers.Any()
+                ? (await db.AssetAssignments.FirstOrDefaultAsync())?.AssignedToUserId.ToString() ?? Guid.Empty.ToString()
+                : Guid.Empty.ToString();
 
             return Ok(new
             {
                 siteId = firstSiteId,
-                totalTrucks = trucks.Count,
+                totalTrucks = resultTrucks.Count,
                 trucks = resultTrucks
             });
-        }
     }
 
     public class LegacyLoginRequest
