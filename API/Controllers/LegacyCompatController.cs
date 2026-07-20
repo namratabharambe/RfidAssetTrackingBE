@@ -444,6 +444,36 @@ namespace API.Controllers
                     });
                 }
 
+                // ── Also pull checkouts from AssetAssignments created by ScanProcessor (ReaderId scan) ──
+                // ScanProcessor sets CustodianName = "<driverName>" or "<driverName> (Truck: <truckNumber>)"
+                if (!string.IsNullOrEmpty(driverName))
+                {
+                    var rfidCheckouts = await db.AssetAssignments
+                        .Include(a => a.Asset)
+                        .Where(a => a.ActualReturnDate == null
+                                 && a.Status == "Active"
+                                 && a.CustodianName != null
+                                 && a.CustodianName.ToLower().Contains(driverName.ToLower()))
+                        .ToListAsync();
+
+                    foreach (var a in rfidCheckouts)
+                    {
+                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.AssetId);
+                        if (lastCheckoutTime == null || a.AssignedDate > lastCheckoutTime)
+                            lastCheckoutTime = a.AssignedDate;
+
+                        checkoutTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? "Unknown Equipment",
+                            tagName = rfidTag?.EpcCode ?? "",
+                            equipmentType = "RFID_SCAN",
+                            detected = "Yes",
+                            checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                            equipmentId = a.AssetId.ToString()
+                        });
+                    }
+                }
+
                 var returnedAssignments = await db.TruckEquipmentAssignments
                     .Where(a => a.TruckId == t.TruckId && a.ReturnedAt != null)
                     .OrderByDescending(a => a.ReturnedAt)
@@ -475,6 +505,38 @@ namespace API.Controllers
                         checkInDate = a.ReturnedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
                     });
                     totalDetected++;
+                }
+
+                // ── Also pull returned AssetAssignments for this driver (RFID check-in via ReaderId) ──
+                if (!string.IsNullOrEmpty(driverName))
+                {
+                    var rfidCheckins = await db.AssetAssignments
+                        .Include(a => a.Asset)
+                        .Where(a => a.ActualReturnDate != null
+                                 && a.Status == "Returned"
+                                 && a.CustodianName != null
+                                 && a.CustodianName.ToLower().Contains(driverName.ToLower()))
+                        .OrderByDescending(a => a.ActualReturnDate)
+                        .Take(10)
+                        .ToListAsync();
+
+                    foreach (var a in rfidCheckins)
+                    {
+                        var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.AssetId);
+                        if (lastCheckinTime == null || a.ActualReturnDate > lastCheckinTime)
+                            lastCheckinTime = a.ActualReturnDate;
+
+                        checkinTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? "Unknown Equipment",
+                            tagName = rfidTag?.EpcCode ?? "",
+                            equipmentType = "RFID_SCAN",
+                            gateStatus = "Matched",
+                            equipmentId = a.AssetId.ToString(),
+                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
+                        });
+                        totalDetected++;
+                    }
                 }
 
                 var openCases = await db.MissingEquipmentCases
