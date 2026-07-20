@@ -42,65 +42,7 @@ namespace API.Controllers
             return File(bytes, "application/vnd.android.package-archive", "com.prosper.assettrackingrfid-Signed.apk");
         }
 
-        [AllowAnonymous]
-        [HttpPost("api/admin/users/login")]
-        public async Task<IActionResult> LegacyLogin([FromBody] LegacyLoginRequest request, [FromServices] IMediator mediator, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-                var loginDto = new Application.DTOs.LoginDto(request.email, request.password);
-                var result = await mediator.Send(new LoginCommand(loginDto, ipAddress), cancellationToken);
 
-                // Find the user's role information
-                var roleName = result.User.Roles.FirstOrDefault() ?? "Admin";
-
-                return Ok(new
-                {
-                    message = "Login successful",
-                    token = result.Token,
-                    user = new
-                    {
-                        userId = result.User.Id.ToString(),
-                        userName = result.User.Username,
-                        email = result.User.Email,
-                        siteId = result.User.SiteId?.ToString() ?? "",
-                        roleId = Guid.Empty.ToString(),
-                        roleName = roleName,
-                        clientType = "AssetTracking"
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                return Unauthorized(new { message = ex.Message });
-            }
-        }
-
-        [AllowAnonymous]
-        [HttpPost("api/admin/users/save-driver")]
-        public async Task<IActionResult> SaveDriver([FromBody] LegacySaveDriverRequest request, [FromServices] AppDbContext db)
-        {
-            if (string.IsNullOrEmpty(request.fullName))
-            {
-                return BadRequest("fullName is required.");
-            }
-
-            var driver = await db.Drivers.FirstOrDefaultAsync(d => d.FullName.ToLower() == request.fullName.ToLower());
-            if (driver == null)
-            {
-                driver = new Driver
-                {
-                    Id = Guid.NewGuid(),
-                    FullName = request.fullName,
-                    CreatedOn = DateTime.UtcNow
-                };
-                db.Drivers.Add(driver);
-                await db.SaveChangesAsync();
-            }
-
-            return Ok(new { success = true });
-        }
 
         [AllowAnonymous]
         [HttpGet("api/Trucks/sites")]
@@ -456,66 +398,6 @@ namespace API.Controllers
             });
         }
 
-        [AllowAnonymous]
-        [HttpGet("api/rfid/equipmentnumberbyrfid/{rfidTag}")]
-        public async Task<IActionResult> GetEquipmentByRfid(string rfidTag, [FromServices] AppDbContext db)
-        {
-            var eq = await db.Equipment
-                .Include(e => e.RfidTag)
-                .FirstOrDefaultAsync(e => e.RfidTag != null && e.RfidTag.TagName == rfidTag);
-
-            if (eq == null)
-            {
-                return Ok(new List<object>());
-            }
-
-            // Query the main Asset table to get details
-            var asset = await db.Assets.FindAsync(eq.EquipmentId);
-
-            return Ok(new List<object>
-            {
-                new
-                {
-                    equipmentName = asset?.Name ?? "Unknown Equipment",
-                    assetNumber = asset?.AssetNumber ?? "EQ-" + eq.EquipmentId.ToString().Substring(0, 8),
-                    rfidTag = rfidTag
-                }
-            });
-        }
-
-        [AllowAnonymous]
-        [HttpGet("api/rfid/readerlist")]
-        public async Task<ActionResult> GetReaderList([FromServices] AppDbContext db, [FromQuery] string siteId, [FromQuery] string? scanMode = null)
-        {
-            if (!Guid.TryParse(siteId, out var siteGuid))
-            {
-                return BadRequest("Invalid siteId format");
-            }
-
-            var query = db.Readers.Where(r => r.SiteId == siteGuid);
-
-            if (!string.IsNullOrEmpty(scanMode))
-            {
-                query = query.Where(r => r.Direction != null && r.Direction.ToUpper() == scanMode.ToUpper());
-            }
-
-            var readers = await query.ToListAsync();
-
-            if (!readers.Any() && !string.IsNullOrEmpty(scanMode))
-            {
-                readers = await db.Readers.Where(r => r.SiteId == siteGuid).ToListAsync();
-            }
-
-            var result = readers.Select(r => new
-            {
-                readerId = r.Id.ToString(),
-                name = r.Name,
-                direction = r.Direction,
-                siteId = r.SiteId.ToString()
-            });
-
-            return Ok(result);
-        }
 
         [AllowAnonymous]
         [HttpGet("api/Trucks/complete-status")]

@@ -71,9 +71,40 @@ namespace Infrastructure.Services
 
                         if (tag == null || tag.AssetId == null)
                         {
-                            scanEvent.Status = ScanStatus.Unknown;
-                            scanEventRepo.Update(scanEvent);
-                            continue;
+                            var cleanEpc = epc.ToUpper();
+                            var assetSuffix = cleanEpc.Length >= 6 ? cleanEpc.Substring(cleanEpc.Length - 6) : cleanEpc;
+                            var cat = await dbContext.AssetCategories.FirstOrDefaultAsync(stoppingToken);
+                            var defaultCatId = cat?.Id ?? Guid.Parse("019f3c62-cbca-75ec-a0a1-568c034f1200");
+
+                            var newAsset = new Asset
+                            {
+                                Id = Guid.NewGuid(),
+                                AssetNumber = $"AST-{assetSuffix}",
+                                Name = $"Scanned Asset ({assetSuffix})",
+                                AssetCategoryId = defaultCatId,
+                                Status = AssetStatus.Available,
+                                CreatedOn = DateTime.UtcNow
+                            };
+                            await assetRepo.AddAsync(newAsset, stoppingToken);
+
+                            if (tag == null)
+                            {
+                                tag = new RFIDTag
+                                {
+                                    Id = Guid.NewGuid(),
+                                    EpcCode = scanEvent.EpcCode,
+                                    AssetId = newAsset.Id,
+                                    Status = TagStatus.Active,
+                                    CreatedOn = DateTime.UtcNow
+                                };
+                                await rfidTagRepo.AddAsync(tag, stoppingToken);
+                            }
+                            else
+                            {
+                                tag.AssetId = newAsset.Id;
+                                rfidTagRepo.Update(tag);
+                            }
+                            await unitOfWork.SaveChangesAsync(stoppingToken);
                         }
 
                         var asset = await assetRepo.GetByIdAsync(tag.AssetId.Value, stoppingToken);
@@ -215,7 +246,16 @@ namespace Infrastructure.Services
                                 if (handheld != null)
                                 {
                                     // Default to the asset's current location first (so it preserves API updates)
-                                    scannedLocationId = asset.LocationId ?? Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
+                                    scannedLocationId = asset.LocationId;
+                                    if (scannedLocationId == null)
+                                    {
+                                        var fallbackGuid = Guid.Parse("019f39bb-a292-7f9e-a894-3252a13b4825");
+                                        var locExists = await unitOfWork.Repository<Location>().GetByIdAsync(fallbackGuid, stoppingToken);
+                                        if (locExists != null)
+                                        {
+                                            scannedLocationId = fallbackGuid;
+                                        }
+                                    }
 
                                     var gpsDevices = await unitOfWork.Repository<GPSDevice>().GetFilteredAsync(g => g.Imei == handheld.DeviceSerial, stoppingToken);
                                     var gpsDevice = gpsDevices.FirstOrDefault();

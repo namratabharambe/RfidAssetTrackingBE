@@ -469,6 +469,7 @@ namespace API.Controllers
     {
         public AssetAssignmentsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
+        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<AssetAssignmentDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -487,8 +488,55 @@ namespace API.Controllers
                 cancellationToken,
                 x => x.Asset,
                 x => x.AssignedToUser);
-            Response.Headers.Add("X-Total-Count", total.ToString());
-            return Ok(Mapper.Map<List<AssetAssignmentDto>>(items));
+
+            var dtos = Mapper.Map<List<AssetAssignmentDto>>(items);
+
+            // Fetch AssetMovements so handheld/reader checkouts & checkins appear in assignments API & UI (excluding general inventory scans)
+            var movementRepo = UnitOfWork.Repository<AssetMovement>();
+            var movements = await movementRepo.GetFilteredAsync(
+                m => m.MovementType != null &&
+                     m.MovementType != "RFIDScan" &&
+                     m.MovementType != "ScanInventory" &&
+                     m.MovementType != "HandheldInventory",
+                cancellationToken,
+                m => m.Asset,
+                m => m.HandheldDevice,
+                m => m.DestinationLocation,
+                m => m.SourceLocation);
+
+            foreach (var m in movements.OrderByDescending(x => x.MovementDate))
+            {
+                if (dtos.Any(d => d.Id == m.Id || (d.AssetId == m.AssetId && d.AssignedDate == m.MovementDate)))
+                    continue;
+
+                var isReturned = string.Equals(m.MovementType, "Checkin", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(m.MovementType, "Return", StringComparison.OrdinalIgnoreCase);
+
+                var deviceName = m.HandheldDevice?.Name ?? "Handheld RFID Reader";
+                var remarks = m.Remarks ?? "Scanned automatically at RFID Reader.";
+
+                dtos.Add(new AssetAssignmentDto
+                {
+                    Id = m.Id,
+                    AssetId = m.AssetId,
+                    AssetName = m.Asset?.Name ?? "Unknown Equipment",
+                    AssetNumber = m.Asset?.AssetNumber ?? "AST-000",
+                    AssignedToUserId = Guid.Empty,
+                    AssignedToUsername = deviceName,
+                    CustodianName = deviceName,
+                    AssignedDate = m.MovementDate,
+                    ExpectedReturnDate = isReturned ? null : m.MovementDate.AddDays(1),
+                    ActualReturnDate = isReturned ? m.MovementDate : null,
+                    Purpose = m.MovementType ?? "Checkout",
+                    Status = isReturned ? "Returned" : "Active",
+                    Notes = remarks
+                });
+            }
+
+            var sortedDtos = dtos.OrderByDescending(d => d.AssignedDate).ToList();
+
+            Response.Headers.Add("X-Total-Count", sortedDtos.Count.ToString());
+            return Ok(sortedDtos);
         }
 
         [HttpGet("{id:guid}")]

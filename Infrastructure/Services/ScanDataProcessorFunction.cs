@@ -88,10 +88,15 @@ public class ScanDataProcessorFunction
         }
 
         var reader = await _db.Readers.FirstOrDefaultAsync(r => r.Id == readerGuid && r.SiteId == siteId);
+        HandheldDevice? handheld = null;
         if (reader == null)
         {
-            _logger.LogWarning("Reader {ReaderId} not found for Site {SiteId}", readerId, siteId);
-            return;
+            handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => h.Id == readerGuid);
+            if (handheld == null)
+            {
+                _logger.LogWarning("Reader or Handheld {ReaderId} not found for Site {SiteId}", readerId, siteId);
+                return;
+            }
         }
 
         // 4. Debounce: Ignore same tag within 5 seconds for live environments
@@ -102,11 +107,11 @@ public class ScanDataProcessorFunction
 
         foreach (var session in sessions)
         {
-            await ProcessSingleSessionAsync(siteId, reader, session, now);
+            await ProcessSingleSessionAsync(siteId, reader, handheld, session, now);
         }
     }
 
-    private async Task ProcessSingleSessionAsync(Guid siteId, Reader reader, ScanSession session, DateTime now)
+    private async Task ProcessSingleSessionAsync(Guid siteId, Reader? reader, HandheldDevice? handheld, ScanSession session, DateTime now)
     {
         var scannedEpcs = session.Scans
             .Select(s => s.Epc?.Trim().ToUpperInvariant())
@@ -130,15 +135,37 @@ public class ScanDataProcessorFunction
         // 6. Identify Entities
         var (scannedTruck, equipments) = await IdentifyEntitiesAsync(scannedEpcs, siteId);
 
+        Guid deviceId = reader != null ? reader.Id : handheld!.Id;
+        Guid readerIdForGate = reader != null ? reader.ReaderId : handheld!.Id;
+
         var activeSession = await _db.ActiveTruckSessions
-            .FirstOrDefaultAsync(x => x.ReaderId == reader.Id && x.SiteId == siteId);
+            .FirstOrDefaultAsync(x => x.ReaderId == deviceId && x.SiteId == siteId);
 
         // Resolve Direction
-        var direction = reader.Direction?.Trim().ToUpperInvariant() ?? "ENTRY";
-        if (direction == "BOTH")
+        string direction = "ENTRY";
+        if (reader != null)
         {
-            var dirTruckId = scannedTruck?.TruckId ?? activeSession?.TruckId;
-            direction = await ResolveBothDirectionAsync(dirTruckId, equipments, siteId);
+            direction = reader.Direction?.Trim().ToUpperInvariant() ?? "ENTRY";
+            if (direction == "BOTH")
+            {
+                var dirTruckId = scannedTruck?.TruckId ?? activeSession?.TruckId;
+                direction = await ResolveBothDirectionAsync(dirTruckId, equipments, siteId);
+            }
+        }
+        else
+        {
+            var firstScan = session.Scans.FirstOrDefault();
+            if (firstScan != null && firstScan.type != null)
+            {
+                if (firstScan.type.IndexOf("Exit", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    direction = "EXIT";
+                }
+                else if (firstScan.type.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    direction = "ENTRY";
+                }
+            }
         }
 
         var isCheckout = direction == "ENTRY";
@@ -152,7 +179,7 @@ public class ScanDataProcessorFunction
             // NEW TRUCK ARRIVED: Finalize previous if different
             if (activeSession != null && activeSession.TruckId != scannedTruck.TruckId)
             {
-                await FinalizePreviousTruckSessionAsync(activeSession, siteId, reader, now);
+                await FinalizePreviousTruckSessionAsync(activeSession, siteId, readerIdForGate, now);
             }
 
             // Check if truck already processed today for this direction to avoid duplicates
@@ -167,7 +194,7 @@ public class ScanDataProcessorFunction
                 GateEventId = Guid.NewGuid(),
                 TruckId = scannedTruck.TruckId,
                 DriverId = scannedTruck.DriverId,
-                ReaderId = reader.ReaderId,
+                ReaderId = readerIdForGate,
                 SiteId = siteId,
                 EventTime = session.End,
                 EventType = eventType,
@@ -177,7 +204,7 @@ public class ScanDataProcessorFunction
 
             if (activeSession == null)
             {
-                activeSession = new ActiveTruckSession { Id = Guid.NewGuid(), ReaderId = reader.ReaderId, SiteId = siteId };
+                activeSession = new ActiveTruckSession { Id = Guid.NewGuid(), ReaderId = deviceId, SiteId = siteId };
                 _db.ActiveTruckSessions.Add(activeSession);
             }
 
@@ -194,7 +221,7 @@ public class ScanDataProcessorFunction
             // If CHECKIN, handle missing logic immediately
             if (!isCheckout)
             {
-                await HandleMissingEquipmentLogicAsync(scannedTruck, activeSession.DriverId, scannedEpcs, siteId, reader, now, gateEvent.GateEventId);
+                await HandleMissingEquipmentLogicAsync(scannedTruck, activeSession.DriverId, scannedEpcs, siteId, now, gateEvent.GateEventId);
             }
         }
         else if (equipments.Any())
@@ -204,11 +231,11 @@ public class ScanDataProcessorFunction
             Guid? associatedGateEventId = activeSession?.GateEventId;
             Guid? associatedDriverId = activeSession?.DriverId;
 
-            // Fallback: if no active session but scans are of type "Reader", find the most recent truck event at this reader/site
-            if (associatedTruckId == null && associatedDriverId == null && session.Scans.Any(s => s.type == "Reader"))
+            // Fallback: if no active session but scans are of type "Reader" or "Handheld", find the most recent truck event at this reader/site
+            if (associatedTruckId == null && associatedDriverId == null)
             {
                 var lastTruckEvent = await _db.GateEvents
-                    .Where(g => g.SiteId == siteId && g.ReaderId == reader.ReaderId && (g.TruckId != null || g.DriverId != null))
+                    .Where(g => g.SiteId == siteId && g.ReaderId == readerIdForGate && (g.TruckId != null || g.DriverId != null))
                     .OrderByDescending(g => g.EventTime)
                     .FirstOrDefaultAsync();
 
@@ -233,7 +260,7 @@ public class ScanDataProcessorFunction
                     GateEventId = Guid.NewGuid(),
                     TruckId = associatedTruckId,
                     DriverId = associatedDriverId,
-                    ReaderId = reader.ReaderId,
+                    ReaderId = readerIdForGate,
                     SiteId = siteId,
                     EventTime = session.End,
                     EventType = eventType,
@@ -256,7 +283,7 @@ public class ScanDataProcessorFunction
                     var truckObj = associatedTruckId.HasValue
                         ? await _db.Trucks.FindAsync(associatedTruckId.Value)
                         : null;
-                    await HandleMissingEquipmentLogicAsync(truckObj, associatedDriverId, scannedEpcs, siteId, reader, now, gateEvent.GateEventId);
+                    await HandleMissingEquipmentLogicAsync(truckObj, associatedDriverId, scannedEpcs, siteId, now, gateEvent.GateEventId);
                 }
             }
             else
@@ -266,7 +293,7 @@ public class ScanDataProcessorFunction
                 {
                     GateEventId = Guid.NewGuid(),
                     TruckId = null,
-                    ReaderId = reader.ReaderId,
+                    ReaderId = readerIdForGate,
                     SiteId = siteId,
                     EventTime = session.End,
                     EventType = eventType,
@@ -383,7 +410,7 @@ public class ScanDataProcessorFunction
         }
     }
 
-    private async Task HandleMissingEquipmentLogicAsync(Truck? truck, Guid? driverId, List<string> checkinEpcs, Guid siteId, Reader reader, DateTime now, Guid currentGateEventId)
+    private async Task HandleMissingEquipmentLogicAsync(Truck? truck, Guid? driverId, List<string> checkinEpcs, Guid siteId, DateTime now, Guid currentGateEventId)
     {
         if (truck == null && !driverId.HasValue) return;
 
@@ -543,9 +570,9 @@ public class ScanDataProcessorFunction
         }
     }
 
-    private async Task FinalizePreviousTruckSessionAsync(ActiveTruckSession activeSession, Guid siteId, Reader reader, DateTime now)
+    private async Task FinalizePreviousTruckSessionAsync(ActiveTruckSession activeSession, Guid siteId, Guid? readerId, DateTime now)
     {
-        _logger.LogInformation("Finalizing previous session for Truck {TruckId} on Reader {ReaderId}", activeSession.TruckId, reader.ReaderId);
+        _logger.LogInformation("Finalizing previous session for Truck {TruckId} on Reader {ReaderId}", activeSession.TruckId, readerId);
         activeSession.TruckId = null;
         activeSession.DriverId = null;
         activeSession.GateEventId = null;

@@ -212,7 +212,7 @@ namespace Application.DTOs
         List<ScanCountDto> WeeklyScans,
         List<ScanCountDto> MonthlyScans
     );
-    public record SiteStatDto(string SiteName, int Total, int InUse, int Available, int Maintenance);
+    public record SiteStatDto(string SiteName, int Total, int InUse, int Available, int Maintenance, int RfidReadsToday, int GpsPingsToday, int ExceptionAlerts, int ComplianceTasks);
     public record ReaderStatusDto(string Name, string Location, string Status);
     public record GPSDeviceStatusDto(string Name, string AssetName, int Battery, string Status);
     public record ActivityLogDto(string Description, DateTime Timestamp, string Operator);

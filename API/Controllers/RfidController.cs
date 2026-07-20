@@ -153,7 +153,7 @@ namespace API.Controllers
                     ReaderId = resolvedReaderId,
                     SiteId = batch.SiteId,
                     Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime(),
-                    type = e.type,
+                    type = string.IsNullOrEmpty(batch.ScanMode) ? e.type : $"{e.type}|{batch.ScanMode}",
                     CreatedOn = DateTime.UtcNow
                 };
                 _db.RfidScans.Add(scan);
@@ -188,20 +188,23 @@ namespace API.Controllers
             var tag = await _db.RFIDTags.FirstOrDefaultAsync(t => t.EpcCode == rfidTag);
             if (tag == null || tag.AssetId == null)
             {
-                return NotFound($"No asset linked to RFID tag: {rfidTag}");
+                return Ok(new List<object>());
             }
 
             var asset = await _db.Assets.FindAsync(tag.AssetId.Value);
             if (asset == null)
             {
-                return NotFound($"Asset not found for RFID tag: {rfidTag}");
+                return Ok(new List<object>());
             }
 
-            return Ok(new
+            return Ok(new List<object>
             {
-                equipmentName = asset.Name,
-                assetNumber = asset.AssetNumber,
-                rfidTag = rfidTag
+                new
+                {
+                    equipmentName = asset.Name,
+                    assetNumber = asset.AssetNumber,
+                    rfidTag = rfidTag
+                }
             });
         }
 
@@ -217,9 +220,18 @@ namespace API.Controllers
             var siteId = request.siteId;
             var operatorName = request.operatorName ?? "Handheld Operator";
 
-            // 1. Resolve handheld device (first active one)
-            var handheld = await _db.HandheldDevices
-                .FirstOrDefaultAsync(h => !h.IsDeleted);
+            // 1. Resolve handheld device (matched by serial/name, or first active handheld)
+            HandheldDevice? handheld = null;
+            if (!string.IsNullOrWhiteSpace(request.handheldDeviceSerial))
+            {
+                handheld = await _db.HandheldDevices
+                    .FirstOrDefaultAsync(h => !h.IsDeleted && (h.DeviceSerial.ToLower() == request.handheldDeviceSerial.ToLower() || h.Name.ToLower() == request.handheldDeviceSerial.ToLower()));
+            }
+            if (handheld == null)
+            {
+                handheld = await _db.HandheldDevices
+                    .FirstOrDefaultAsync(h => !h.IsDeleted);
+            }
             Guid? handheldGuid = handheld?.Id;
 
             // 2. Resolve location: by name first, then first location in the site
@@ -237,11 +249,74 @@ namespace API.Controllers
                     locQuery = parts[^1].Trim();
                 }
 
+                var locQueryClean = System.Text.RegularExpressions.Regex.Replace(locQuery, @"[-_\s]", "").ToLower();
+
                 resolvedLocation = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
                     .FirstOrDefaultAsync(l =>
-                        (l.Name.ToLower() == locQuery.ToLower() || l.Code.ToLower() == locQuery.ToLower()) &&
-                        (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId));
+                        (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId) &&
+                        (l.Name.ToLower() == locQuery.ToLower() ||
+                         l.Code.ToLower() == locQuery.ToLower() ||
+                         l.Name.ToLower().Replace("-", " ").Replace("_", " ") == locQuery.ToLower().Replace("-", " ").Replace("_", " ") ||
+                         l.Code.ToLower().Replace("-", " ").Replace("_", " ") == locQuery.ToLower().Replace("-", " ").Replace("_", " ") ||
+                         l.Name.ToLower().Contains(locQuery.ToLower()) ||
+                         l.Code.ToLower().Contains(locQuery.ToLower())));
+
+                // Auto-create new location if custom location specified from handheld is not yet in DB
+                if (resolvedLocation == null && !string.IsNullOrWhiteSpace(locQuery))
+                {
+                    var defaultZone = await _db.Zones
+                        .Include(z => z.Warehouse)
+                        .FirstOrDefaultAsync(z => siteId == Guid.Empty || z.Warehouse.SiteId == siteId);
+
+                    if (defaultZone == null)
+                    {
+                        var targetSiteId = siteId;
+                        if (targetSiteId == Guid.Empty)
+                        {
+                            var site = await _db.Sites.FirstOrDefaultAsync();
+                            targetSiteId = site?.Id ?? Guid.NewGuid();
+                        }
+
+                        var warehouse = await _db.Warehouses.FirstOrDefaultAsync(w => w.SiteId == targetSiteId);
+                        if (warehouse == null)
+                        {
+                            warehouse = new Warehouse
+                            {
+                                Id = Guid.NewGuid(),
+                                SiteId = targetSiteId,
+                                Name = "Main Warehouse",
+                                Code = "WH-MAIN",
+                                CreatedOn = DateTime.UtcNow
+                            };
+                            _db.Warehouses.Add(warehouse);
+                            await _db.SaveChangesAsync();
+                        }
+
+                        defaultZone = new Zone
+                        {
+                            Id = Guid.NewGuid(),
+                            WarehouseId = warehouse.Id,
+                            Name = "General Storage Zone",
+                            Code = "ZONE-GEN",
+                            CreatedOn = DateTime.UtcNow
+                        };
+                        _db.Zones.Add(defaultZone);
+                        await _db.SaveChangesAsync();
+                    }
+
+                    var locCode = "LOC-" + System.Text.RegularExpressions.Regex.Replace(locQuery, @"\s+", "-").ToUpper();
+                    resolvedLocation = new Location
+                    {
+                        Id = Guid.NewGuid(),
+                        ZoneId = defaultZone.Id,
+                        Name = locQuery,
+                        Code = locCode,
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    _db.Locations.Add(resolvedLocation);
+                    await _db.SaveChangesAsync();
+                }
             }
 
             // Coordinates lookup fallback (decoupled from GPSHistory/GPSDevice tables):
@@ -294,14 +369,6 @@ namespace API.Controllers
                 }
             }
 
-            // Final fallback to first location of the site
-            if (resolvedLocation == null && siteId != Guid.Empty)
-            {
-                resolvedLocation = await _db.Locations
-                    .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
-                    .FirstOrDefaultAsync(l => l.Zone.Warehouse.SiteId == siteId);
-            }
-
             var resolvedLocationId = resolvedLocation?.Id;
             var resolvedLocationName = resolvedLocation?.Name ?? request.location;
 
@@ -333,12 +400,43 @@ namespace API.Controllers
                 var epcClean = row.rfid.Trim();
 
                 // Update asset location by matching RFID tag
-                var tag = await _db.RFIDTags.FirstOrDefaultAsync(t =>
-                    t.EpcCode.ToLower() == epcClean.ToLower() && t.AssetId != null);
-
                 Guid? originalLocationId = null;
+                var tag = await _db.RFIDTags.FirstOrDefaultAsync(t =>
+                    t.EpcCode.ToLower() == epcClean.ToLower());
 
-                if (tag != null)
+                if (tag == null)
+                {
+                    var cleanEpc = epcClean.Replace(" ", "").ToUpper();
+                    var assetSuffix = cleanEpc.Length >= 6 ? cleanEpc.Substring(cleanEpc.Length - 6) : cleanEpc;
+                    var cat = await _db.AssetCategories.FirstOrDefaultAsync();
+                    var defaultCatId = cat?.Id ?? Guid.Parse("019f3c62-cbca-75ec-a0a1-568c034f1200");
+
+                    var newAsset = new Asset
+                    {
+                        Id = Guid.NewGuid(),
+                        AssetNumber = $"AST-{assetSuffix}",
+                        Name = $"Scanned Asset ({assetSuffix})",
+                        AssetCategoryId = defaultCatId,
+                        Status = Domain.Enums.AssetStatus.Available,
+                        LocationId = resolvedLocationId,
+                        SiteId = siteId != Guid.Empty ? siteId : (resolvedLocation?.Zone?.Warehouse?.SiteId ?? Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91")),
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    _db.Assets.Add(newAsset);
+
+                    tag = new RFIDTag
+                    {
+                        Id = Guid.NewGuid(),
+                        EpcCode = epcClean,
+                        AssetId = newAsset.Id,
+                        Status = Domain.Enums.TagStatus.Active,
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    _db.RFIDTags.Add(tag);
+                    await _db.SaveChangesAsync();
+                }
+
+                if (tag != null && tag.AssetId != null)
                 {
                     var asset = await _db.Assets.FindAsync(tag.AssetId);
                     if (asset != null)
@@ -459,6 +557,51 @@ namespace API.Controllers
                 sessionId = session.Id,
                 operator_ = operatorName
             });
+        }
+
+        [AllowAnonymous]
+        [HttpGet("inventory-scans")]
+        public async Task<ActionResult> GetInventoryScannedItems()
+        {
+            var movements = await _db.AssetMovements
+                .Include(m => m.Asset).ThenInclude(a => a.AssetCategory)
+                .Include(m => m.Asset).ThenInclude(a => a.Site)
+                .Include(m => m.Asset).ThenInclude(a => a.Location)
+                .Include(m => m.DestinationLocation)
+                .Include(m => m.HandheldDevice)
+                .Where(m => !m.IsDeleted && (m.MovementType == "HandheldInventory" || m.MovementType == "ScanInventory"))
+                .OrderByDescending(m => m.MovementDate)
+                .ToListAsync();
+
+            var tags = await _db.RFIDTags.Where(t => !t.IsDeleted).ToListAsync();
+
+            var items = movements
+                .GroupBy(m => m.AssetId)
+                .Select(g =>
+                {
+                    var latest = g.First();
+                    var asset = latest.Asset;
+                    var tag = tags.FirstOrDefault(t => t.AssetId == asset.Id);
+                    return new
+                    {
+                        id = asset.Id,
+                        sku = asset.AssetNumber,
+                        name = asset.Name,
+                        category = asset.AssetCategory?.Name ?? "General",
+                        rfidTag = tag?.EpcCode ?? "—",
+                        expectedQty = 1,
+                        actualQty = asset.Status == Domain.Enums.AssetStatus.Retired ? 0 : 1,
+                        unit = "unit",
+                        zone = asset.Site?.Name ?? "Pune DC",
+                        binLocation = latest.DestinationLocation?.Name ?? asset.Location?.Name ?? "Staging Area",
+                        status = asset.Status == Domain.Enums.AssetStatus.Retired ? "Missing" : "In Stock",
+                        lastAuditTime = latest.MovementDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                        checkedBy = latest.HandheldDevice?.Name ?? "Android Handheld"
+                    };
+                })
+                .ToList();
+
+            return Ok(items);
         }
 
         [AllowAnonymous]
@@ -599,49 +742,52 @@ namespace API.Controllers
 
         [AllowAnonymous]
         [HttpGet("readerlist")]
-        public async Task<ActionResult> GetReaderList(Guid siteId, string scanMode)
+        public async Task<ActionResult> GetReaderList([FromQuery] string siteId, [FromQuery] string? scanMode = null)
         {
-            // Try to find fixed readers for this site first
-            var emptyGuid = Guid.Empty;
-            var readers = await _db.Readers
-                .Where(r => siteId == emptyGuid || r.SiteId == siteId)
-                .Select(r => new
-                {
-                    ReaderId = r.Id.ToString(),
-                    ReaderId2 = r.Id.ToString(),
-                    id = r.Id,
-                    name = r.Name,
-                    ipAddress = r.IpAddress,
-                    port = r.Port,
-                    antennaCount = r.AntennaCount,
-                    powerDbm = r.PowerDbm,
-                    status = r.Status
-                })
-                .ToListAsync<object>();
-
-            // Fallback: if no fixed readers, return registered handheld devices
-            // The Android app uses ReaderId from this list to post scans
-            if (readers.Count == 0)
+            if (!Guid.TryParse(siteId, out var siteGuid))
             {
+                return BadRequest("Invalid siteId format");
+            }
+
+            var query = _db.Readers.Where(r => r.SiteId == siteGuid);
+
+            if (!string.IsNullOrEmpty(scanMode))
+            {
+                query = query.Where(r => r.Direction != null && r.Direction.ToUpper() == scanMode.ToUpper());
+            }
+
+            var readers = await query.ToListAsync();
+
+            if (!readers.Any() && !string.IsNullOrEmpty(scanMode))
+            {
+                readers = await _db.Readers.Where(r => r.SiteId == siteGuid).ToListAsync();
+            }
+
+            if (!readers.Any())
+            {
+                // Fallback to handheld devices
                 var handhelds = await _db.HandheldDevices
                     .Where(h => !h.IsDeleted)
                     .Select(h => new
                     {
-                        ReaderId = h.DeviceSerial,
-                        ReaderId2 = h.Id.ToString(),
-                        id = h.Id,
+                        readerId = h.Id.ToString(),
                         name = h.Name,
-                        ipAddress = h.DeviceSerial,
-                        port = 0,
-                        antennaCount = 1,
-                        powerDbm = 0,
-                        status = h.Status
+                        direction = (string?)null,
+                        siteId = siteGuid.ToString()
                     })
-                    .ToListAsync<object>();
+                    .ToListAsync();
                 return Ok(handhelds);
             }
 
-            return Ok(readers);
+            var result = readers.Select(r => new
+            {
+                readerId = r.Id.ToString(),
+                name = r.Name,
+                direction = r.Direction,
+                siteId = r.SiteId.ToString()
+            });
+
+            return Ok(result);
         }
 
         [HttpPost("/api/admin/users/save-driver")]
@@ -686,6 +832,7 @@ namespace API.Controllers
         public string location { get; set; } = null!;
         public Guid siteId { get; set; }
         public string? operatorName { get; set; }
+        public string? handheldDeviceSerial { get; set; }
         public double? latitude { get; set; }
         public double? longitude { get; set; }
         public List<ScanInventoryRowDto> rows { get; set; } = new();
@@ -726,6 +873,7 @@ namespace API.Controllers
         public string? ReaderId { get; set; }
         public string? DeviceId { get; set; } // Support alternate fixed reader payloads
         public string SiteId { get; set; } = null!;
+        public string? ScanMode { get; set; } // Support handheld checkin/checkout modes
         public List<RfidEvent> Events { get; set; } = new();
     }
 

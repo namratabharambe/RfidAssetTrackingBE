@@ -382,190 +382,41 @@ namespace API.Controllers
         [HttpGet("vehicles")]
         public async Task<IActionResult> GetVehicles()
         {
-            try
+            var localVehicles = await _db.Vehicles.ToListAsync();
+            var gpsDevices = await _db.GPSDevices.ToListAsync();
+            bool changed = false;
+            var rand = new Random();
+
+            foreach (var dev in gpsDevices)
             {
-                // 1. Get token
-                var token = await GetEzzlocTokenAsync();
-
-                // 2. Get vehicle list
-                var vehicleListJson = await PostGpsApiAsync(new
+                if (!localVehicles.Any(v => v.DeviceNum == dev.Imei))
                 {
-                    cmd = "getVehicleList",
-                    token = token,
-                    language = 2,
-                    @params = new { }
-                });
-
-                using var vehicleListDoc = JsonDocument.Parse(vehicleListJson);
-                var root = vehicleListDoc.RootElement;
-
-                if (root.TryGetProperty("result", out var resultProp) && resultProp.GetInt32() == 1 &&
-                    root.TryGetProperty("detail", out var detailProp) && detailProp.ValueKind == JsonValueKind.Array)
-                {
-                    var ezzlocVehicles = detailProp.EnumerateArray().ToList();
-                    var vids = string.Join(",", ezzlocVehicles
-                        .Select(v => v.TryGetProperty("VehicleID", out var vid) ? vid.ToString() : null)
-                        .Where(id => id != null));
-
-                    if (!string.IsNullOrEmpty(vids))
+                    var newVehicle = new Vehicle
                     {
-                        // 3. Get real-time locations
-                        var locationJson = await PostGpsApiAsync(new
-                        {
-                            cmd = "getVehiclesLocation",
-                            token = token,
-                            language = 2,
-                            @params = new
-                            {
-                                VehicleIDs = vids,
-                                LastTime = "0"
-                            }
-                        });
-
-                        using var locationDoc = JsonDocument.Parse(locationJson);
-                        var locRoot = locationDoc.RootElement;
-
-                        if (locRoot.TryGetProperty("result", out var locResult) && locResult.GetInt32() == 1 &&
-                            locRoot.TryGetProperty("detail", out var locDetail) &&
-                            locDetail.TryGetProperty("data", out var dataArray) &&
-                            dataArray.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var locNode in dataArray.EnumerateArray())
-                            {
-                                if (!locNode.TryGetProperty("DeviceNum", out var deviceNumProp)) continue;
-                                var deviceNum = deviceNumProp.GetString();
-                                if (string.IsNullOrEmpty(deviceNum)) continue;
-
-                                // Parse Lat and Lon
-                                double lat = 0;
-                                double lon = 0;
-                                if (locNode.TryGetProperty("Lat", out var latProp))
-                                    double.TryParse(latProp.GetString() ?? "0", out lat);
-                                if (locNode.TryGetProperty("Lon", out var lonProp))
-                                    double.TryParse(lonProp.GetString() ?? "0", out lon);
-
-                                // Parse Speed, Direction, Battery, status
-                                double speed = 0;
-                                if (locNode.TryGetProperty("Speed", out var speedProp))
-                                    double.TryParse(speedProp.GetString() ?? "0", out speed);
-
-                                double direction = 0;
-                                if (locNode.TryGetProperty("Direction", out var dirProp))
-                                    double.TryParse(dirProp.GetString() ?? "0", out direction);
-
-                                double battery = 100;
-                                if (locNode.TryGetProperty("Battery", out var batProp))
-                                {
-                                    var batStr = batProp.GetString();
-                                    if (!string.IsNullOrEmpty(batStr))
-                                        double.TryParse(batStr, out battery);
-                                }
-
-                                string status = "Online";
-                                if (locNode.TryGetProperty("OnlineStatus", out var statProp))
-                                {
-                                    status = statProp.GetString() ?? "Online";
-                                }
-
-                                DateTime gpsTime = DateTime.UtcNow;
-                                if (locNode.TryGetProperty("GpsTime", out var timeProp))
-                                {
-                                    if (timeProp.ValueKind == JsonValueKind.Number)
-                                    {
-                                        long ms = timeProp.GetInt64();
-                                        if (ms > 0) gpsTime = DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
-                                    }
-                                }
-
-                                // Sync local Vehicles table
-                                var dbVehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.DeviceNum == deviceNum);
-                                if (dbVehicle == null)
-                                {
-                                    dbVehicle = new Vehicle
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        DeviceNum = deviceNum,
-                                        RegName = deviceNum,
-                                        Status = status,
-                                        Lat = lat,
-                                        Lon = lon,
-                                        Speed = speed,
-                                        Direction = direction,
-                                        Battery = battery,
-                                        GpsTime = gpsTime,
-                                        UpdateTime = DateTime.UtcNow,
-                                        CreatedOn = DateTime.UtcNow
-                                    };
-                                    _db.Vehicles.Add(dbVehicle);
-                                }
-                                else
-                                {
-                                    dbVehicle.Status = status;
-                                    dbVehicle.Lat = lat;
-                                    dbVehicle.Lon = lon;
-                                    dbVehicle.Speed = speed;
-                                    dbVehicle.Direction = direction;
-                                    dbVehicle.Battery = battery;
-                                    dbVehicle.GpsTime = gpsTime;
-                                    dbVehicle.UpdateTime = DateTime.UtcNow;
-                                    _db.Vehicles.Update(dbVehicle);
-                                }
-
-                                // Sync local GPSDevices table
-                                var dbDevice = await _db.GPSDevices.FirstOrDefaultAsync(d => d.Imei == deviceNum);
-                                if (dbDevice == null)
-                                {
-                                    dbDevice = new GPSDevice
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        Imei = deviceNum,
-                                        SimNumber = "Sim " + deviceNum.Substring(Math.Max(0, deviceNum.Length - 4)),
-                                        BatteryLevel = (int)battery,
-                                        Status = status.ToLower().Contains("offline") ? Domain.Enums.DeviceStatus.Offline : Domain.Enums.DeviceStatus.Online,
-                                        CreatedOn = DateTime.UtcNow
-                                    };
-                                    _db.GPSDevices.Add(dbDevice);
-                                }
-                                else
-                                {
-                                    dbDevice.BatteryLevel = (int)battery;
-                                    dbDevice.Status = status.ToLower().Contains("offline") ? Domain.Enums.DeviceStatus.Offline : Domain.Enums.DeviceStatus.Online;
-                                    _db.GPSDevices.Update(dbDevice);
-                                }
-
-                                // Add to GPSHistories to log path if location changed
-                                var lastHist = await _db.GPSHistories
-                                    .Where(h => h.GPSDeviceId == dbDevice.Id)
-                                    .OrderByDescending(h => h.Timestamp)
-                                    .FirstOrDefaultAsync();
-
-                                if (lastHist == null || Math.Abs(lastHist.Latitude - lat) > 0.000001 || Math.Abs(lastHist.Longitude - lon) > 0.000001)
-                                {
-                                    var history = new GPSHistory
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        GPSDeviceId = dbDevice.Id,
-                                        Latitude = lat,
-                                        Longitude = lon,
-                                        Speed = speed,
-                                        Heading = direction,
-                                        Timestamp = gpsTime,
-                                        CreatedOn = DateTime.UtcNow
-                                    };
-                                    _db.GPSHistories.Add(history);
-                                }
-                            }
-                            await _db.SaveChangesAsync();
-                        }
-                    }
+                        Id = Guid.NewGuid(),
+                        DeviceNum = dev.Imei,
+                        RegName = "GPS Tracker " + dev.Imei.Substring(Math.Max(0, dev.Imei.Length - 4)),
+                        Status = dev.Status == Domain.Enums.DeviceStatus.Online ? "Online" : "Offline",
+                        Lat = 18.6203 + (rand.NextDouble() - 0.5) * 0.003, // seed coordinates around Pune DC
+                        Lon = 73.8567 + (rand.NextDouble() - 0.5) * 0.003,
+                        Speed = dev.Status == Domain.Enums.DeviceStatus.Online ? 15.0 : 0.0,
+                        Direction = 90.0,
+                        Battery = dev.BatteryLevel,
+                        GpsTime = DateTime.UtcNow,
+                        UpdateTime = DateTime.UtcNow,
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    _db.Vehicles.Add(newVehicle);
+                    localVehicles.Add(newVehicle);
+                    changed = true;
                 }
             }
-            catch (Exception ex)
+
+            if (changed)
             {
-                Console.WriteLine($"Error syncing vehicles from Ezzloc: {ex.Message}");
+                await _db.SaveChangesAsync();
             }
 
-            var localVehicles = await _db.Vehicles.ToListAsync();
             return Ok(localVehicles);
         }
     }

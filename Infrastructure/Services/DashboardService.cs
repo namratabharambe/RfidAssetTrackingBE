@@ -41,16 +41,41 @@ namespace Infrastructure.Services
                 .Include(x => x.Warehouses)
                 .ToListAsync(cancellationToken);
 
+            var today = DateTime.UtcNow.Date;
             var siteStats = new List<SiteStatDto>();
             foreach (var site in sites)
             {
                 var siteAssets = assets.Where(x => x.SiteId == site.Id).ToList();
+                var siteIdStr = site.Id.ToString();
+
+                var rfidReads = await _context.RfidScans
+                    .Where(s => s.SiteId == siteIdStr && s.Timestamp >= today)
+                    .CountAsync(cancellationToken);
+
+                var gpsPings = await _context.GPSHistories
+                    .Include(h => h.GPSDevice)
+                    .ThenInclude(d => d.Asset)
+                    .Where(h => h.GPSDevice.Asset != null && h.GPSDevice.Asset.SiteId == site.Id && h.Timestamp >= today)
+                    .CountAsync(cancellationToken);
+
+                var alertsCount = await _context.Alerts
+                    .Where(a => !a.IsDeleted && !a.IsResolved && a.Asset != null && a.Asset.SiteId == site.Id)
+                    .CountAsync(cancellationToken);
+
+                var complianceTasks = await _context.InventoryAudits
+                    .Where(a => a.Status == AuditStatus.Scheduled && a.AuditItems.Any(i => i.Asset.SiteId == site.Id))
+                    .CountAsync(cancellationToken);
+
                 siteStats.Add(new SiteStatDto(
                     site.Name,
                     siteAssets.Count,
                     siteAssets.Count(x => x.Status == AssetStatus.Assigned),
                     siteAssets.Count(x => x.Status == AssetStatus.Available),
-                    siteAssets.Count(x => x.Status == AssetStatus.UnderMaintenance)
+                    siteAssets.Count(x => x.Status == AssetStatus.UnderMaintenance),
+                    rfidReads,
+                    gpsPings,
+                    alertsCount,
+                    complianceTasks
                 ));
             }
 
@@ -142,7 +167,7 @@ namespace Infrastructure.Services
             }).ToList();
 
             // ── Scan Counts (Today / Weekly / Monthly) ────────────────────────────
-            var today = DateTime.UtcNow.Date;
+            today = DateTime.UtcNow.Date;
             var scanEvents = await _context.ScanEvents
                 .Where(x => !x.IsDeleted && x.Timestamp >= today)
                 .ToListAsync(cancellationToken);
