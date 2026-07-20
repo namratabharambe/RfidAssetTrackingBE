@@ -444,20 +444,27 @@ namespace API.Controllers
                 if (processedDriverIds.Contains(driver.Id)) continue;
                 processedDriverIds.Add(driver.Id);
 
-                // Get ReaderIds this driver is currently active on via ActiveTruckSessions
-                var driverSessionReaderIds = await db.ActiveTruckSessions
-                    .Where(s => s.DriverId == driver.Id && s.ReaderId != Guid.Empty)
-                    .Select(s => s.ReaderId)
+                // Get AssetIds associated with this driver via AssetAssignments.CustodianName
+                var driverAssetIds = await db.AssetAssignments
+                    .Where(a => a.CustodianName != null
+                             && a.CustodianName.ToLower().Contains(driver.FullName.ToLower()))
+                    .Select(a => a.AssetId)
                     .Distinct()
                     .ToListAsync();
 
-                // ── CHECKOUT TABLE: EXIT reader movements for this driver's session ──
+                // ── CHECKOUT TABLE: EXIT reader movements for this driver's assets ──
                 var checkoutTable = new List<object>();
                 DateTime? lastCheckoutTime = null;
                 var addedCheckoutIds = new System.Collections.Generic.HashSet<string>();
 
-                IEnumerable<AssetMovement> exitMovements = allExitMovements
-                    .Where(m => m.ReaderId != null && driverSessionReaderIds.Contains(m.ReaderId.Value));
+                IEnumerable<AssetMovement> exitMovements = new List<AssetMovement>();
+
+                if (driverAssetIds.Any())
+                {
+                    // Filter by driver's assets
+                    exitMovements = allExitMovements
+                        .Where(m => driverAssetIds.Contains(m.AssetId));
+                }
 
                 foreach (var m in exitMovements)
                 {
@@ -513,13 +520,18 @@ namespace API.Controllers
                     }
                 }
 
-                // ── CHECKIN TABLE: ENTRY reader movements for this driver's session ──
+                // ── CHECKIN TABLE: ENTRY reader movements for this driver's assets ──
                 var checkinTable = new List<object>();
                 DateTime? lastCheckinTime = null;
                 int totalDetected = 0;
 
-                IEnumerable<AssetMovement> entryMovements = allEntryMovements
-                    .Where(m => m.ReaderId != null && driverSessionReaderIds.Contains(m.ReaderId.Value));
+                IEnumerable<AssetMovement> entryMovements = new List<AssetMovement>();
+
+                if (driverAssetIds.Any())
+                {
+                    entryMovements = allEntryMovements
+                        .Where(m => driverAssetIds.Contains(m.AssetId));
+                }
 
                 foreach (var m in entryMovements)
                 {
