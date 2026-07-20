@@ -681,4 +681,5 @@ namespace API.Controllers
         public string siteId { get; set; } = null!;
         public string? rfidTagId { get; set; }
     }
+    }
 }
