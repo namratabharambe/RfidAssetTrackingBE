@@ -155,7 +155,7 @@ namespace Infrastructure.Services
                                              else if (truck != null)
                                                  custodianName = $"Truck: {truck.TruckNumber}";
 
-                                             var isCheckout = reader.Direction.Trim().ToUpperInvariant() == "ENTRY";
+                                             var isCheckout = reader.Direction.Trim().ToUpperInvariant() == "EXIT";
 
                                              if (isCheckout)
                                              {
