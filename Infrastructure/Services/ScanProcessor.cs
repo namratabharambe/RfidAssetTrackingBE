@@ -132,10 +132,13 @@ namespace Infrastructure.Services
                                      // Handheld Check-In / Check-Out Assignment Logic:
                                      if (reader.Direction != null && (reader.Direction.Trim().ToUpperInvariant() == "ENTRY" || reader.Direction.Trim().ToUpperInvariant() == "EXIT"))
                                      {
+                                         _logger.LogInformation($"ScanProcessor: Reader {reader.Id} has direction {reader.Direction}. Checking for ActiveTruckSessions...");
                                          var activeSession = await dbContext.ActiveTruckSessions
                                              .FirstOrDefaultAsync(s => s.ReaderId == reader.Id && s.SiteId == reader.SiteId, stoppingToken);
+                                         
                                          if (activeSession != null)
                                          {
+                                             _logger.LogInformation($"ScanProcessor: Found active session for Driver {activeSession.DriverId}");
                                              string custodianName = "Handheld Operator";
                                              Driver? driver = null;
                                              AssetTracking.Rfid.Domain.Entities.Truck? truck = null;
@@ -156,14 +159,18 @@ namespace Infrastructure.Services
                                                  custodianName = $"Truck: {truck.TruckNumber}";
 
                                              var isCheckout = reader.Direction.Trim().ToUpperInvariant() == "EXIT";
+                                             _logger.LogInformation($"ScanProcessor: IsCheckout = {isCheckout}, CustodianName = {custodianName}");
 
                                              if (isCheckout)
                                              {
                                                  // CHECK-OUT
                                                  var existingAssignments = await unitOfWork.Repository<AssetAssignment>()
                                                      .GetFilteredAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null, stoppingToken);
+                                                 
+                                                 _logger.LogInformation($"ScanProcessor: Existing active assignments for Asset {asset.Id}: {existingAssignments.Count()}");
+                                                 
                                                  if (!existingAssignments.Any())
-                                                     {
+                                                 {
                                                       var defaultUser = await dbContext.Users.FirstOrDefaultAsync(stoppingToken);
                                                       var newAssignment = new AssetAssignment
                                                       {
@@ -177,6 +184,7 @@ namespace Infrastructure.Services
                                                           Notes = $"Checked out via Handheld Scanner. Reader: {reader.Name}."
                                                       };
                                                       await unitOfWork.Repository<AssetAssignment>().AddAsync(newAssignment, stoppingToken);
+                                                      _logger.LogInformation($"ScanProcessor: Added new AssetAssignment {newAssignment.Id} for Asset {asset.Id}");
 
                                                      asset.Status = AssetStatus.Assigned;
                                                      asset.SiteId = reader.SiteId;
@@ -236,6 +244,10 @@ namespace Infrastructure.Services
                                                      }
                                                  }
                                              }
+                                         }
+                                         else
+                                         {
+                                             _logger.LogWarning($"ScanProcessor: No ActiveTruckSession found for Reader {reader.Id} and Site {reader.SiteId}. Handheld logic skipped.");
                                          }
                                      }
                                  }
