@@ -63,16 +63,16 @@ namespace Infrastructure.Persistence.Context
                 await context.SaveChangesAsync();
             }
 
-            // 3. Seed Admin User (username admin, email trackit@prosper.com, password 123456)
-            if (!await context.Users.AnyAsync())
-            {
-                var saltBytes = new byte[16] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
-                var saltStr = Convert.ToBase64String(saltBytes);
-                
-                using var rfc2898 = new Rfc2898DeriveBytes("123456", saltBytes, 10000, HashAlgorithmName.SHA256);
-                var hashBytes = rfc2898.GetBytes(32);
-                var hashStr = Convert.ToBase64String(hashBytes);
+            // 3. Seed Users (Admin, Supervisor, Operator with password 123456)
+            var saltBytes = new byte[16] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+            var saltStr = Convert.ToBase64String(saltBytes);
+            
+            using var rfc2898 = new Rfc2898DeriveBytes("123456", saltBytes, 10000, HashAlgorithmName.SHA256);
+            var hashBytes = rfc2898.GetBytes(32);
+            var hashStr = Convert.ToBase64String(hashBytes);
 
+            if (!await context.Users.AnyAsync(u => u.Email == "trackit@prosper.com" || u.Username == "admin"))
+            {
                 var adminUser = new User
                 {
                     Id = Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"),
@@ -83,12 +83,34 @@ namespace Infrastructure.Persistence.Context
                     IsActive = true,
                     SiteId = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91")
                 };
-
                 await context.Users.AddAsync(adminUser);
                 await context.SaveChangesAsync();
 
-                var adminRole = await context.Roles.FirstAsync(r => r.Name == "Super Admin");
-                await context.UserRoles.AddAsync(new UserRole { UserId = adminUser.Id, RoleId = adminRole.Id });
+                var adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "Super Admin");
+                if (adminRole != null)
+                {
+                    await context.UserRoles.AddAsync(new UserRole { UserId = adminUser.Id, RoleId = adminRole.Id });
+                    await context.SaveChangesAsync();
+                }
+            }
+
+            if (!await context.Users.AnyAsync(u => u.Email == "operator@prosper.com" || u.Username == "operator"))
+            {
+                var opUser = new User
+                {
+                    Id = Guid.Parse("e2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6e"),
+                    Username = "operator",
+                    Email = "operator@prosper.com",
+                    PasswordHash = hashStr,
+                    PasswordSalt = saltStr,
+                    IsActive = true,
+                    SiteId = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91")
+                };
+                await context.Users.AddAsync(opUser);
+                await context.SaveChangesAsync();
+
+                var supervisorRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "Supervisor") ?? await context.Roles.FirstAsync();
+                await context.UserRoles.AddAsync(new UserRole { UserId = opUser.Id, RoleId = supervisorRole.Id });
                 await context.SaveChangesAsync();
             }
 

@@ -113,30 +113,39 @@ namespace API.Controllers
             }
 
 
-            // 2. Fetch or create a ScanSession if we found a valid reader/handheld
+            // 2. Fetch or create a ScanSession for handheld / reader scans
             Guid? sessionId = null;
-            if (readerGuid != null || handheldGuid != null)
-            {
-                var session = await _db.ScanSessions.FirstOrDefaultAsync(s => 
-                    s.IsRunning && 
-                    ((readerGuid != null && s.ReaderId == readerGuid) || (handheldGuid != null && s.HandheldDeviceId == handheldGuid)));
+            var session = await _db.ScanSessions.FirstOrDefaultAsync(s => 
+                s.IsRunning && 
+                ((readerGuid != null && s.ReaderId == readerGuid) || 
+                 (handheldGuid != null && s.HandheldDeviceId == handheldGuid) ||
+                 (!string.IsNullOrEmpty(batch.OperatorName) && s.SessionName == $"Operator: {batch.OperatorName}")));
 
-                if (session == null)
+            if (session == null)
+            {
+                string sessionName = !string.IsNullOrEmpty(batch.OperatorName) 
+                    ? $"Operator: {batch.OperatorName}" 
+                    : $"Ingest Session {DateTime.UtcNow:yyyyMMdd}";
+
+                session = new ScanSession
                 {
-                    session = new ScanSession
-                    {
-                        Id = Guid.NewGuid(),
-                        SessionName = $"Ingest Session {DateTime.UtcNow:yyyyMMdd}",
-                        StartTime = DateTime.UtcNow,
-                        ReaderId = readerGuid,
-                        HandheldDeviceId = handheldGuid,
-                        IsRunning = true,
-                        CreatedOn = DateTime.UtcNow
-                    };
-                    _db.ScanSessions.Add(session);
-                }
-                sessionId = session.Id;
+                    Id = Guid.NewGuid(),
+                    SessionName = sessionName,
+                    StartTime = DateTime.UtcNow,
+                    ReaderId = readerGuid,
+                    HandheldDeviceId = handheldGuid,
+                    IsRunning = true,
+                    CreatedOn = DateTime.UtcNow
+                };
+                _db.ScanSessions.Add(session);
             }
+            else if (!string.IsNullOrEmpty(batch.OperatorName))
+            {
+                // Update session name if operator is provided
+                session.SessionName = $"Operator: {batch.OperatorName}";
+                _db.ScanSessions.Update(session);
+            }
+            sessionId = session.Id;
 
             string resolvedReaderId = batch.ReaderId ?? batch.DeviceId ?? "";
 
@@ -234,13 +243,10 @@ namespace API.Controllers
             }
             Guid? handheldGuid = handheld?.Id;
 
-            // 2. Resolve location: by name first, then first location in the site
+            // 2. Resolve location: custom typed location auto-creates if new, blank input falls back to existing DB location
             Location? resolvedLocation = null;
 
-            // Check if location is not selected or matches "gps" (case-insensitive)
-            bool isGpsLookup = string.IsNullOrWhiteSpace(request.location) || request.location.Equals("gps", StringComparison.OrdinalIgnoreCase);
-
-            if (!isGpsLookup)
+            if (!string.IsNullOrWhiteSpace(request.location) && !request.location.StartsWith("GPS", StringComparison.OrdinalIgnoreCase))
             {
                 var locQuery = request.location.Trim();
                 if (locQuery.Contains(" › "))
@@ -249,20 +255,16 @@ namespace API.Controllers
                     locQuery = parts[^1].Trim();
                 }
 
-                var locQueryClean = System.Text.RegularExpressions.Regex.Replace(locQuery, @"[-_\s]", "").ToLower();
-
                 resolvedLocation = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
                     .FirstOrDefaultAsync(l =>
                         (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId) &&
                         (l.Name.ToLower() == locQuery.ToLower() ||
                          l.Code.ToLower() == locQuery.ToLower() ||
-                         l.Name.ToLower().Replace("-", " ").Replace("_", " ") == locQuery.ToLower().Replace("-", " ").Replace("_", " ") ||
-                         l.Code.ToLower().Replace("-", " ").Replace("_", " ") == locQuery.ToLower().Replace("-", " ").Replace("_", " ") ||
                          l.Name.ToLower().Contains(locQuery.ToLower()) ||
                          l.Code.ToLower().Contains(locQuery.ToLower())));
 
-                // Auto-create new location if custom location specified from handheld is not yet in DB
+                // Auto-create new location if custom location specified from handheld (e.g., "bay 777") is not yet in DB
                 if (resolvedLocation == null && !string.IsNullOrWhiteSpace(locQuery))
                 {
                     var defaultZone = await _db.Zones
@@ -319,7 +321,7 @@ namespace API.Controllers
                 }
             }
 
-            // Coordinates lookup fallback (decoupled from GPSHistory/GPSDevice tables):
+            // Coordinates lookup fallback against existing DB locations:
             double? requestLat = request.latitude;
             double? requestLon = request.longitude;
 
@@ -342,7 +344,7 @@ namespace API.Controllers
 
             if (resolvedLocation == null && requestLat.HasValue && requestLon.HasValue)
             {
-                var locations = await _db.Locations
+                var locationsWithCoords = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
                     .Where(l => l.Latitude != null && l.Longitude != null && (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId))
                     .ToListAsync();
@@ -350,7 +352,7 @@ namespace API.Controllers
                 Location? closestLocation = null;
                 double minDistance = double.MaxValue;
 
-                foreach (var loc in locations)
+                foreach (var loc in locationsWithCoords)
                 {
                     double latDiff = (double)loc.Latitude!.Value - requestLat.Value;
                     double lonDiff = (double)loc.Longitude!.Value - requestLon.Value;
@@ -369,8 +371,17 @@ namespace API.Controllers
                 }
             }
 
+            // Final fallback: Always map to an existing registered Location in the database
+            if (resolvedLocation == null)
+            {
+                resolvedLocation = await _db.Locations
+                    .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
+                    .FirstOrDefaultAsync(l => siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId)
+                    ?? await _db.Locations.Include(l => l.Zone).ThenInclude(z => z.Warehouse).FirstOrDefaultAsync();
+            }
+
             var resolvedLocationId = resolvedLocation?.Id;
-            var resolvedLocationName = resolvedLocation?.Name ?? request.location;
+            var resolvedLocationName = resolvedLocation?.Name ?? "Pune DC Main Warehouse";
 
             // 3. Create or reuse an open scan session for this handheld/site
             var session = await _db.ScanSessions.FirstOrDefaultAsync(s =>
@@ -461,6 +472,57 @@ namespace API.Controllers
                             Remarks = $"Scanned at {resolvedLocationName} via Handheld Inventory."
                         };
                         _db.AssetMovements.Add(movement);
+
+                        // Automatically update any Missing or CheckedOut status in Check-In / Check-Out (AssetAssignments)
+                        var assignmentsToUpdate = await _db.AssetAssignments
+                            .Where(a => a.AssetId == asset.Id && (a.Status == "Missing" || a.Status == "CheckedOut" || a.ActualReturnDate == null))
+                            .ToListAsync();
+
+                        foreach (var assign in assignmentsToUpdate)
+                        {
+                            assign.Status = "Completed";
+                            assign.ActualReturnDate = DateTime.UtcNow;
+                            assign.Notes = (assign.Notes ?? "") + $" | Auto-completed via Handheld Inventory Scan at {resolvedLocationName}";
+                            _db.AssetAssignments.Update(assign);
+                        }
+
+                        // Also update any TruckEquipmentAssignments linked to this asset/equipment
+                        var truckAssignmentsToUpdate = await _db.TruckEquipmentAssignments
+                            .Where(ta => ta.EquipmentId == asset.Id && ta.ReturnedAt == null)
+                            .ToListAsync();
+
+                        foreach (var ta in truckAssignmentsToUpdate)
+                        {
+                            ta.Status = "Completed";
+                            ta.ReturnedAt = DateTime.UtcNow;
+                            _db.TruckEquipmentAssignments.Update(ta);
+                        }
+
+                        // Also recover missing equipment cases linked to this asset/EPC
+                        var openCases = await _db.MissingEquipmentCases
+                            .Include(c => c.Items)
+                            .Where(c => c.ClosedAt == null)
+                            .ToListAsync();
+
+                        foreach (var c in openCases)
+                        {
+                            foreach (var mi in c.Items.Where(i => !i.IsRecovered && (i.EquipmentId == asset.Id || i.Epc.ToLower() == epcClean.ToLower())))
+                            {
+                                mi.IsRecovered = true;
+                                mi.RecoveredAt = DateTime.UtcNow;
+                            }
+                            if (!c.Items.Any(i => !i.IsRecovered))
+                            {
+                                c.ClosedAt = DateTime.UtcNow;
+                            }
+                        }
+
+                        // Update asset status to Available if it was in any non-available state
+                        if (asset.Status != Domain.Enums.AssetStatus.Available)
+                        {
+                            asset.Status = Domain.Enums.AssetStatus.Available;
+                            _db.Assets.Update(asset);
+                        }
 
                         // Reconcile with active audits
                         var activeAudits = await _db.InventoryAudits
@@ -742,11 +804,39 @@ namespace API.Controllers
 
         [AllowAnonymous]
         [HttpGet("readerlist")]
-        public async Task<ActionResult> GetReaderList([FromQuery] string siteId, [FromQuery] string? scanMode = null)
+        public async Task<ActionResult> GetReaderList([FromQuery] string siteId, [FromQuery] string? scanMode = null, [FromQuery] string? deviceId = null)
         {
             if (!Guid.TryParse(siteId, out var siteGuid))
             {
                 return BadRequest("Invalid siteId format");
+            }
+
+            // 1. If deviceId is provided, look for matching Handheld Device first
+            if (!string.IsNullOrEmpty(deviceId))
+            {
+                HandheldDevice? handheld = null;
+                if (Guid.TryParse(deviceId, out var parsedGuid))
+                {
+                    handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => !h.IsDeleted && h.Id == parsedGuid);
+                }
+                if (handheld == null)
+                {
+                    handheld = await _db.HandheldDevices.FirstOrDefaultAsync(h => !h.IsDeleted && (h.DeviceSerial.ToLower() == deviceId.ToLower() || h.Name.ToLower() == deviceId.ToLower()));
+                }
+
+                if (handheld != null)
+                {
+                    return Ok(new List<object>
+                    {
+                        new
+                        {
+                            readerId = handheld.Id.ToString(),
+                            name = handheld.Name,
+                            direction = scanMode,
+                            siteId = siteGuid.ToString()
+                        }
+                    });
+                }
             }
 
             var query = _db.Readers.Where(r => r.SiteId == siteGuid);
@@ -796,6 +886,9 @@ namespace API.Controllers
         {
             try
             {
+                var entityType = string.IsNullOrWhiteSpace(request.Type) ? "Driver" : request.Type.Trim();
+                if (entityType.Equals("Driver-Based", StringComparison.OrdinalIgnoreCase)) entityType = "Driver";
+
                 var existing = await _db.Drivers
                     .FirstOrDefaultAsync(d => d.FullName.ToLower() == request.FullName.ToLower() && !d.IsDeleted);
 
@@ -805,13 +898,20 @@ namespace API.Controllers
                     {
                         Id = Guid.NewGuid(),
                         FullName = request.FullName,
+                        Email = $"Type:{entityType}",
                         CreatedOn = DateTime.UtcNow
                     };
                     _db.Drivers.Add(driver);
                     await _db.SaveChangesAsync();
                 }
+                else
+                {
+                    existing.Email = $"Type:{entityType}";
+                    _db.Drivers.Update(existing);
+                    await _db.SaveChangesAsync();
+                }
 
-                return Ok(new { success = true, message = "Driver saved successfully" });
+                return Ok(new { success = true, message = "Saved successfully" });
             }
             catch (Exception ex)
             {
@@ -874,6 +974,7 @@ namespace API.Controllers
         public string? DeviceId { get; set; } // Support alternate fixed reader payloads
         public string SiteId { get; set; } = null!;
         public string? ScanMode { get; set; } // Support handheld checkin/checkout modes
+        public string? OperatorName { get; set; }
         public List<RfidEvent> Events { get; set; } = new();
     }
 

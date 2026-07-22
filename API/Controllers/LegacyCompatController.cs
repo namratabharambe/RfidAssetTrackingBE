@@ -74,7 +74,10 @@ namespace API.Controllers
         [HttpGet("api/Trucks/drivers")]
         public async Task<IActionResult> GetDrivers([FromServices] AppDbContext db)
         {
-            var drivers = await db.Drivers.ToListAsync();
+            var drivers = await db.Drivers
+                .Where(d => d.Email != "Type:Individual")
+                .ToListAsync();
+
             var dropdownItems = drivers.Select(d => new
             {
                 id = d.Id.ToString(),
@@ -87,8 +90,11 @@ namespace API.Controllers
         [HttpGet("api/Trucks/individual")]
         public async Task<IActionResult> GetIndividuals([FromServices] AppDbContext db)
         {
-            var drivers = await db.Drivers.ToListAsync();
-            var dropdownItems = drivers.Select(d => new
+            var individuals = await db.Drivers
+                .Where(d => d.Email == "Type:Individual")
+                .ToListAsync();
+
+            var dropdownItems = individuals.Select(d => new
             {
                 id = d.Id.ToString(),
                 text = d.FullName
@@ -106,7 +112,7 @@ namespace API.Controllers
                 .ToListAsync();
 
             var drivers = await db.Drivers
-                .Where(d => activeSessionDrivers.Contains(d.Id))
+                .Where(d => activeSessionDrivers.Contains(d.Id) && d.Email != "Type:Individual")
                 .ToListAsync();
 
             var dropdownItems = drivers.Select(d => new
@@ -121,7 +127,21 @@ namespace API.Controllers
         [HttpGet("api/Trucks/activeIndividual")]
         public async Task<IActionResult> GetActiveIndividuals([FromServices] AppDbContext db)
         {
-            return await GetActiveDrivers(db);
+            var activeSessionDrivers = await db.ActiveTruckSessions
+                .Where(s => s.DriverId != null)
+                .Select(s => s.DriverId)
+                .ToListAsync();
+
+            var individuals = await db.Drivers
+                .Where(d => activeSessionDrivers.Contains(d.Id) && d.Email == "Type:Individual")
+                .ToListAsync();
+
+            var dropdownItems = individuals.Select(d => new
+            {
+                id = d.Id.ToString(),
+                text = d.FullName
+            });
+            return Ok(dropdownItems);
         }
 
         [AllowAnonymous]
@@ -635,6 +655,144 @@ namespace API.Controllers
                         summary = new
                         {
                             totalExpected = totalExpected,
+                            totalDetected = totalDetected,
+                            missingCount = missingCount
+                        }
+                    }
+                });
+            }
+
+            // ── Also include standalone AssetAssignment checkouts (Individual / Driver-Based) ──────
+            var processedCustodians = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in resultTrucks)
+            {
+                // Each truck already covers its driver's assignments; mark them processed
+                var rObj = r as dynamic;
+            }
+
+            var standaloneAssignments = await db.AssetAssignments
+                .Include(a => a.Asset)
+                .Where(a => a.CustodianName != null && a.CustodianName.Length > 0)
+                .OrderByDescending(a => a.AssignedDate)
+                .Take(200)
+                .ToListAsync();
+
+            // Group by custodian name
+            var byCustodian = standaloneAssignments
+                .GroupBy(a => a.CustodianName!, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // Determine which custodians are already covered by the drivers above
+            var coveredCustodians = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in drivers)
+                coveredCustodians.Add(d.FullName);
+
+            foreach (var group in byCustodian)
+            {
+                string custodianName = group.Key;
+                if (coveredCustodians.Contains(custodianName)) continue;
+                if (custodianName == "Standalone Handheld Operator" || custodianName == "Handheld Operator") continue;
+
+                coveredCustodians.Add(custodianName);
+
+                var checkoutTable = new List<object>();
+                var checkinTable = new List<object>();
+                DateTime? lastCheckoutTime = null;
+                DateTime? lastCheckinTime = null;
+                int totalDetected = 0;
+                int missingCount = 0;
+
+                foreach (var a in group)
+                {
+                    var rfidTag = a.Asset != null ? await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.Asset.Id) : null;
+                    bool isReturned = a.ActualReturnDate != null || a.Status == "Returned" || a.Status == "Completed";
+                    bool isMissing = a.Status == "Missing" && !isReturned;
+
+                    var epc = rfidTag?.EpcCode ?? "";
+
+                    bool isAutoCompleted = a.Status == "Completed" || (a.Notes != null && a.Notes.Contains("Handheld Inventory"));
+                    string detectedStatus = isAutoCompleted ? "COMPLETED" : (isReturned ? "RETURNED" : (isMissing ? "MISSING" : ""));
+
+                    checkoutTable.Add(new
+                    {
+                        equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
+                        tagName = epc,
+                        equipmentType = a.Notes != null && a.Notes.Contains("Driver") ? "DRIVER_CHECKOUT" : "INDIVIDUAL_CHECKOUT",
+                        detected = detectedStatus,
+                        checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                        equipmentId = a.AssetId.ToString()
+                    });
+
+                    if (lastCheckoutTime == null || a.AssignedDate > lastCheckoutTime)
+                        lastCheckoutTime = a.AssignedDate;
+
+                    if (isAutoCompleted)
+                    {
+                        checkinTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
+                            tagName = epc,
+                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            gateStatus = "COMPLETED",
+                            equipmentId = a.AssetId.ToString(),
+                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss")
+                        });
+                        totalDetected++;
+                        if (a.ActualReturnDate > lastCheckinTime)
+                            lastCheckinTime = a.ActualReturnDate;
+                    }
+                    else if (isReturned)
+                    {
+                        checkinTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
+                            tagName = epc,
+                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            gateStatus = "RETURNED",
+                            equipmentId = a.AssetId.ToString(),
+                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
+                        });
+                        totalDetected++;
+                        if (a.ActualReturnDate > lastCheckinTime)
+                            lastCheckinTime = a.ActualReturnDate;
+                    }
+                    else
+                    {
+                        checkinTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
+                            tagName = epc,
+                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            gateStatus = "MISSING",
+                            equipmentId = a.AssetId.ToString(),
+                            checkInDate = "-"
+                        });
+                        missingCount++;
+                    }
+                }
+
+                if (checkoutTable.Count == 0) continue;
+
+                resultTrucks.Add(new
+                {
+                    truck = new
+                    {
+                        truckId = custodianName,
+                        truckNumber = $"Individual-{custodianName}",
+                        driver = custodianName
+                    },
+                    checkOut = new
+                    {
+                        lastCheckoutTime = lastCheckoutTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                        table = checkoutTable
+                    },
+                    checkIn = new
+                    {
+                        lastCheckinTime = lastCheckinTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                        table = checkinTable,
+                        summary = new
+                        {
+                            totalExpected = totalDetected + missingCount,
                             totalDetected = totalDetected,
                             missingCount = missingCount
                         }
