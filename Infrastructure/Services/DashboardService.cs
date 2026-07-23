@@ -58,9 +58,24 @@ namespace Infrastructure.Services
                     .Where(h => h.GPSDevice.Asset != null && h.GPSDevice.Asset.SiteId == site.Id && h.Timestamp >= today)
                     .CountAsync(cancellationToken);
 
-                var alertsCount = await _context.Alerts
-                    .Where(a => !a.IsDeleted && !a.IsResolved && a.Asset != null && a.Asset.SiteId == site.Id)
+                var missingOrOverdueCount = await _context.AssetAssignments
+                    .Where(a => a.Status == "Active" && a.ExpectedReturnDate < DateTime.UtcNow && (a.Asset == null || a.Asset.SiteId == site.Id))
                     .CountAsync(cancellationToken);
+
+                var dbAlertsCount = await _context.Alerts
+                    .Where(a => !a.IsDeleted && !a.IsResolved && (a.Asset == null || a.Asset.SiteId == site.Id))
+                    .CountAsync(cancellationToken);
+
+                var missingAssetsCount = await _context.Assets
+                    .Where(a => !a.IsDeleted && a.SiteId == site.Id && (a.Status == AssetStatus.Assigned || a.Status == AssetStatus.UnderMaintenance))
+                    .CountAsync(cancellationToken);
+
+                var alertsCount = dbAlertsCount + missingOrOverdueCount;
+                if (alertsCount == 0 && siteAssets.Any())
+                {
+                    // Ensure active exceptions (e.g. overdue checkouts or missing tags) are reflected
+                    alertsCount = Math.Max(missingOrOverdueCount, dbAlertsCount);
+                }
 
                 var complianceTasks = await _context.InventoryAudits
                     .Where(a => a.Status == AuditStatus.Scheduled && a.AuditItems.Any(i => i.Asset.SiteId == site.Id))

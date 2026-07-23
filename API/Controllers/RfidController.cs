@@ -149,11 +149,62 @@ namespace API.Controllers
 
             string resolvedReaderId = batch.ReaderId ?? batch.DeviceId ?? "";
 
-            // 3. Save RfidScan records and generate ScanEvents
+            // Resolve Reader Direction / Name for CheckIn / CheckOut determination
+            string isEntryOrExit = "";
+            Reader? matchedReader = null;
+            if (readerGuid != null)
+            {
+                matchedReader = await _db.Readers.FindAsync(readerGuid);
+            }
+            else if (!string.IsNullOrEmpty(resolvedReaderId))
+            {
+                matchedReader = await _db.Readers.FirstOrDefaultAsync(r => r.Name == resolvedReaderId || r.IpAddress == resolvedReaderId || r.Id.ToString() == resolvedReaderId);
+            }
+
+            if (matchedReader != null)
+            {
+                var dirStr = (matchedReader.Direction ?? "").ToUpper();
+                var nameStr = (matchedReader.Name ?? "").ToUpper();
+                if (dirStr == "EXIT" || nameStr.Contains("EXIT")) isEntryOrExit = "EXIT";
+                else if (dirStr == "ENTRY" || nameStr.Contains("ENTRY")) isEntryOrExit = "ENTRY";
+            }
+            
+            if (string.IsNullOrEmpty(isEntryOrExit) && !string.IsNullOrEmpty(batch.ScanMode))
+            {
+                if (batch.ScanMode.ToUpper().Contains("EXIT")) isEntryOrExit = "EXIT";
+                else if (batch.ScanMode.ToUpper().Contains("ENTRY")) isEntryOrExit = "ENTRY";
+            }
+
+            // Numeric or custom ReaderId fallback mapping ("1", "2", "3", "4", "Reader 1", etc.)
+            if (string.IsNullOrEmpty(isEntryOrExit) && !string.IsNullOrEmpty(resolvedReaderId))
+            {
+                var rClean = resolvedReaderId.Trim().ToLower();
+                if (rClean == "1" || rClean == "3" || rClean.Contains("entry") || rClean.Contains("in") || rClean.Contains("reader 1") || rClean.Contains("reader 3") || rClean.Contains("door 1"))
+                {
+                    isEntryOrExit = "ENTRY";
+                    if (matchedReader == null)
+                        matchedReader = await _db.Readers.FirstOrDefaultAsync(r => (r.Name != null && r.Name.ToLower().Contains("entry")) || (r.Direction != null && r.Direction.ToLower() == "entry"));
+                }
+                else if (rClean == "2" || rClean == "4" || rClean.Contains("exit") || rClean.Contains("out") || rClean.Contains("reader 2") || rClean.Contains("reader 4") || rClean.Contains("door 2"))
+                {
+                    isEntryOrExit = "EXIT";
+                    if (matchedReader == null)
+                        matchedReader = await _db.Readers.FirstOrDefaultAsync(r => (r.Name != null && r.Name.ToLower().Contains("exit")) || (r.Direction != null && r.Direction.ToLower() == "exit"));
+                }
+            }
+
+            // 3. Save RfidScan records and generate ScanEvents / AssetMovements
             foreach (var e in batch.Events)
             {
                 var scanId = e.ScanId == Guid.Empty ? Guid.NewGuid() : e.ScanId;
+                var scanTs = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime();
                 
+                var scanTypeStr = string.IsNullOrEmpty(batch.ScanMode) ? e.type : $"{e.type}|{batch.ScanMode}";
+                if (!string.IsNullOrEmpty(isEntryOrExit) && !scanTypeStr.ToUpper().Contains(isEntryOrExit))
+                {
+                    scanTypeStr = $"{scanTypeStr}|{isEntryOrExit}";
+                }
+
                 var scan = new RfidScan
                 {
                     ScanId = scanId,
@@ -161,8 +212,8 @@ namespace API.Controllers
                     Rssi = e.Rssi,
                     ReaderId = resolvedReaderId,
                     SiteId = batch.SiteId,
-                    Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime(),
-                    type = string.IsNullOrEmpty(batch.ScanMode) ? e.type : $"{e.type}|{batch.ScanMode}",
+                    Timestamp = scanTs,
+                    type = scanTypeStr,
                     CreatedOn = DateTime.UtcNow
                 };
                 _db.RfidScans.Add(scan);
@@ -174,7 +225,7 @@ namespace API.Controllers
                         Id = Guid.NewGuid(),
                         ScanSessionId = sessionId.Value,
                         EpcCode = e.Epc,
-                        Timestamp = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime(),
+                        Timestamp = scanTs,
                         Rssi = (int)e.Rssi,
                         AntennaIndex = 1,
                         ReaderId = readerGuid,
@@ -183,6 +234,42 @@ namespace API.Controllers
                         CreatedOn = DateTime.UtcNow
                     };
                     _db.ScanEvents.Add(scanEvent);
+                }
+
+                // If scanned by Entry or Exit reader, create AssetMovement & update Asset status
+                if (!string.IsNullOrEmpty(e.Epc))
+                {
+                    var cleanEpc = e.Epc.Trim().ToLower();
+                    var tag = await _db.RFIDTags.FirstOrDefaultAsync(t => t.EpcCode.ToLower() == cleanEpc);
+                    if (tag != null && tag.AssetId != null)
+                    {
+                        var asset = await _db.Assets.FindAsync(tag.AssetId.Value);
+                        if (asset != null)
+                        {
+                            string movType = isEntryOrExit == "EXIT" ? "CheckOut" : (isEntryOrExit == "ENTRY" ? "CheckIn" : "FixedReaderScan");
+                            var movement = new AssetMovement
+                            {
+                                Id = Guid.NewGuid(),
+                                AssetId = asset.Id,
+                                ReaderId = matchedReader?.Id ?? readerGuid,
+                                MovementDate = scanTs,
+                                MovementType = movType,
+                                Remarks = $"Scanned at Fixed Reader ({matchedReader?.Name ?? resolvedReaderId}) [{movType}]."
+                            };
+                            _db.AssetMovements.Add(movement);
+
+                            if (isEntryOrExit == "EXIT")
+                            {
+                                asset.Status = Domain.Enums.AssetStatus.Assigned;
+                                _db.Assets.Update(asset);
+                            }
+                            else if (isEntryOrExit == "ENTRY")
+                            {
+                                asset.Status = Domain.Enums.AssetStatus.Available;
+                                _db.Assets.Update(asset);
+                            }
+                        }
+                    }
                 }
             }
 

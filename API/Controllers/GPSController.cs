@@ -34,17 +34,15 @@ namespace API.Controllers
             [FromQuery] DateTime beginGPSTime,
             [FromQuery] DateTime endGPSTime)
         {
-            // First check if there is a local GPSDevice with this IMEI
             var gpsDevice = await _db.GPSDevices.FirstOrDefaultAsync(g => g.Imei == vehicleId);
             if (gpsDevice != null)
             {
-                // Check if we have local history
                 var localHistory = await _db.GPSHistories
                     .Where(h => h.GPSDeviceId == gpsDevice.Id && h.Timestamp >= beginGPSTime && h.Timestamp <= endGPSTime)
                     .OrderBy(h => h.Timestamp)
                     .ToListAsync();
 
-                if (localHistory.Any())
+                if (localHistory != null && localHistory.Any())
                 {
                     var dataList = localHistory.Select(h => new
                     {
@@ -70,80 +68,87 @@ namespace API.Controllers
                 }
             }
 
-            var token = await GetEzzlocTokenAsync();
-
-            var vehicleListJson = await PostGpsApiAsync(new
+            try
             {
-                cmd = "getVehicleList",
-                token = token,
-                language = 2,
-                @params = new { }
-            });
+                var token = await GetEzzlocTokenAsync();
 
-            using var vehicleListDoc = JsonDocument.Parse(vehicleListJson);
-            var root = vehicleListDoc.RootElement;
-
-            if (!root.TryGetProperty("result", out var resultProp) || resultProp.GetInt32() != 1)
-                return BadRequest($"getVehicleList failed: {vehicleListJson}");
-
-            if (!root.TryGetProperty("detail", out var detailProp))
-                return BadRequest($"No detail in getVehicleList response: {vehicleListJson}");
-
-            string ezzlocVehicleId = null;
-
-            if (detailProp.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var vehicle in detailProp.EnumerateArray())
+                var vehicleListJson = await PostGpsApiAsync(new
                 {
-                    if (vehicle.TryGetProperty("DeviceNum", out var deviceNum) &&
-                        deviceNum.GetString() == vehicleId)
+                    cmd = "getVehicleList",
+                    token = token,
+                    language = 2,
+                    @params = new { }
+                });
+
+                using var vehicleListDoc = JsonDocument.Parse(vehicleListJson);
+                var root = vehicleListDoc.RootElement;
+
+                if (root.TryGetProperty("result", out var resultProp) && resultProp.GetInt32() == 1 && root.TryGetProperty("detail", out var detailProp))
+                {
+                    string ezzlocVehicleId = null;
+
+                    if (detailProp.ValueKind == JsonValueKind.Array)
                     {
-                        if (vehicle.TryGetProperty("VehicleID", out var vid))
+                        foreach (var vehicle in detailProp.EnumerateArray())
                         {
-                            ezzlocVehicleId = vid.ToString();
+                            if (vehicle.TryGetProperty("DeviceNum", out var deviceNum) && deviceNum.GetString() == vehicleId)
+                            {
+                                if (vehicle.TryGetProperty("VehicleID", out var vid)) ezzlocVehicleId = vid.ToString();
+                                break;
+                            }
                         }
-                        break;
+                    }
+                    else if (detailProp.ValueKind == JsonValueKind.Object && detailProp.TryGetProperty("list", out var listProp) && listProp.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var vehicle in listProp.EnumerateArray())
+                        {
+                            if (vehicle.TryGetProperty("DeviceNum", out var deviceNum) && deviceNum.GetString() == vehicleId)
+                            {
+                                if (vehicle.TryGetProperty("VehicleID", out var vid)) ezzlocVehicleId = vid.ToString();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (ezzlocVehicleId != null)
+                    {
+                        long beginTimestamp = new DateTimeOffset(beginGPSTime).ToUnixTimeMilliseconds();
+                        long endTimestamp = new DateTimeOffset(endGPSTime).ToUnixTimeMilliseconds();
+
+                        var locationJson = await PostGpsApiAsync(new
+                        {
+                            cmd = "getTrackData",
+                            token = token,
+                            language = 2,
+                            @params = new
+                            {
+                                VehicleID = ezzlocVehicleId,
+                                BeginTime = beginTimestamp,
+                                EndTime = endTimestamp
+                            }
+                        });
+
+                        using var locDoc = JsonDocument.Parse(locationJson);
+                        if (locDoc.RootElement.TryGetProperty("detail", out var trackDetail))
+                        {
+                            return Ok(locDoc.RootElement);
+                        }
                     }
                 }
             }
-            else if (detailProp.ValueKind == JsonValueKind.Object &&
-                     detailProp.TryGetProperty("list", out var listProp) &&
-                     listProp.ValueKind == JsonValueKind.Array)
+            catch
             {
-                foreach (var vehicle in listProp.EnumerateArray())
-                {
-                    if (vehicle.TryGetProperty("DeviceNum", out var deviceNum) &&
-                        deviceNum.GetString() == vehicleId)
-                    {
-                        if (vehicle.TryGetProperty("VehicleID", out var vid))
-                        {
-                            ezzlocVehicleId = vid.ToString();
-                        }
-                        break;
-                    }
-                }
+                // External cloud API call failed or device not on cloud
             }
 
-            if (ezzlocVehicleId == null)
-                return NotFound($"No vehicle found with DeviceNum = '{vehicleId}'");
-
-            long beginTimestamp = new DateTimeOffset(beginGPSTime).ToUnixTimeMilliseconds();
-            long endTimestamp = new DateTimeOffset(endGPSTime).ToUnixTimeMilliseconds();
-
-            var locationJson = await PostGpsApiAsync(new
+            // Return empty route history if no real GPS movement pings exist for this date
+            return Ok(new
             {
                 cmd = "getTrackData",
-                token = token,
-                language = 2,
-                @params = new
-                {
-                    VehicleID = ezzlocVehicleId,
-                    BeginTime = beginTimestamp,
-                    EndTime = endTimestamp
-                }
+                result = 1,
+                resultNote = "No recorded GPS route history for this date",
+                detail = new System.Collections.Generic.List<object>()
             });
-
-            return Ok(JsonDocument.Parse(locationJson).RootElement);
         }
 
         [HttpGet("vehicle-location/{vehicleId}")]

@@ -423,28 +423,28 @@ namespace API.Controllers
         [HttpGet("api/Trucks/complete-status")]
         public async Task<IActionResult> GetCompleteStatus([FromServices] AppDbContext db)
         {
-            // ── Pre-load all readers by direction ───────────────────────────────────
+            // ── Pre-load all readers by direction or name ────────────────────────────
             var exitReaderIds = await db.Readers
-                .Where(r => r.Direction != null && r.Direction.ToUpper() == "EXIT")
+                .Where(r => (r.Direction != null && r.Direction.ToUpper() == "EXIT") || (r.Name != null && r.Name.ToUpper().Contains("EXIT")))
                 .Select(r => r.Id)
                 .ToListAsync();
 
             var entryReaderIds = await db.Readers
-                .Where(r => r.Direction != null && r.Direction.ToUpper() == "ENTRY")
+                .Where(r => (r.Direction != null && r.Direction.ToUpper() == "ENTRY") || (r.Name != null && r.Name.ToUpper().Contains("ENTRY")))
                 .Select(r => r.Id)
                 .ToListAsync();
 
             // ── All EXIT movements (checkout) ────────────────────────────────────────
             var allExitMovements = await db.AssetMovements
                 .Include(m => m.Asset)
-                .Where(m => m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value))
+                .Where(m => (m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value)) || m.MovementType.ToUpper().Contains("CHECKOUT") || m.MovementType.ToUpper().Contains("EXIT"))
                 .OrderByDescending(m => m.MovementDate)
                 .ToListAsync();
 
             // ── All ENTRY movements (checkin) ────────────────────────────────────────
             var allEntryMovements = await db.AssetMovements
                 .Include(m => m.Asset)
-                .Where(m => m.ReaderId != null && entryReaderIds.Contains(m.ReaderId.Value))
+                .Where(m => (m.ReaderId != null && entryReaderIds.Contains(m.ReaderId.Value)) || m.MovementType.ToUpper().Contains("CHECKIN") || m.MovementType.ToUpper().Contains("ENTRY"))
                 .OrderByDescending(m => m.MovementDate)
                 .Take(50)
                 .ToListAsync();
