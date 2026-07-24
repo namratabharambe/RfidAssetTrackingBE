@@ -798,6 +798,8 @@ namespace API.Controllers
                         }
                     }
                 });
+            }
+
             // ── WAREHOUSE GATE READERS: All fixed reader movements (CheckIn/CheckOut) ──
             var fixedCheckoutTable = new List<object>();
             var fixedCheckinTable = new List<object>();
