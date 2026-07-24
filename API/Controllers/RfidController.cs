@@ -208,9 +208,22 @@ namespace API.Controllers
             }
 
             var resolvedSiteId = batch.SiteId;
+            if (!string.IsNullOrEmpty(resolvedSiteId))
+            {
+                var sMatch = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted && 
+                    (s.Id.ToString() == resolvedSiteId || 
+                     (s.Code != null && s.Code.ToLower() == resolvedSiteId.Trim().ToLower()) || 
+                     (s.Name != null && s.Name.ToLower().Contains(resolvedSiteId.Trim().ToLower()))));
+                if (sMatch != null)
+                {
+                    resolvedSiteId = sMatch.Id.ToString();
+                }
+            }
+
             if (string.IsNullOrEmpty(resolvedSiteId) || !Guid.TryParse(resolvedSiteId, out _))
             {
-                var defaultSite = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+                var defaultSite = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted && s.Name.Contains("Pune"));
+                defaultSite = defaultSite ?? await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
                 if (defaultSite != null)
                 {
                     resolvedSiteId = defaultSite.Id.ToString();
