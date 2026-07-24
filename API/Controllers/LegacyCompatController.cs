@@ -873,7 +873,7 @@ namespace API.Controllers
                 totalTrucks = resultTrucks.Count,
                 trucks = resultTrucks
             });
-    }
+        }
 
     public class LegacyLoginRequest
     {
