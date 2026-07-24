@@ -207,17 +207,29 @@ namespace API.Controllers
                 else if (antId == 2 || antId == 4) isEntryOrExit = "EXIT";
             }
 
+            var resolvedSiteId = batch.SiteId;
+            if (string.IsNullOrEmpty(resolvedSiteId) || !Guid.TryParse(resolvedSiteId, out _))
+            {
+                var defaultSite = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+                if (defaultSite != null)
+                {
+                    resolvedSiteId = defaultSite.Id.ToString();
+                }
+            }
+
             // 3. Save RfidScan records and generate ScanEvents / AssetMovements
             foreach (var e in batch.Events)
             {
                 var scanId = e.ScanId == Guid.Empty ? Guid.NewGuid() : e.ScanId;
                 var scanTs = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime();
+                var eventAntennaId = e.GetParsedAntennaId() ?? batch.GetParsedAntennaId() ?? 1;
                 
                 var scanTypeStr = string.IsNullOrEmpty(batch.ScanMode) ? e.type : $"{e.type}|{batch.ScanMode}";
                 if (!string.IsNullOrEmpty(isEntryOrExit) && !scanTypeStr.ToUpper().Contains(isEntryOrExit))
                 {
                     scanTypeStr = $"{scanTypeStr}|{isEntryOrExit}";
                 }
+                scanTypeStr = $"{scanTypeStr}|Antenna:{eventAntennaId}";
 
                 var scan = new RfidScan
                 {
@@ -225,7 +237,7 @@ namespace API.Controllers
                     Epc = e.Epc,
                     Rssi = e.Rssi,
                     ReaderId = resolvedReaderId,
-                    SiteId = batch.SiteId,
+                    SiteId = resolvedSiteId ?? "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91",
                     Timestamp = scanTs,
                     type = scanTypeStr,
                     CreatedOn = DateTime.UtcNow
@@ -241,7 +253,7 @@ namespace API.Controllers
                         EpcCode = e.Epc,
                         Timestamp = scanTs,
                         Rssi = (int)e.Rssi,
-                        AntennaIndex = 1,
+                        AntennaIndex = eventAntennaId,
                         ReaderId = readerGuid,
                         HandheldDeviceId = handheldGuid,
                         Status = Domain.Enums.ScanStatus.Matched,
@@ -268,7 +280,7 @@ namespace API.Controllers
                                 ReaderId = matchedReader?.Id ?? readerGuid,
                                 MovementDate = scanTs,
                                 MovementType = movType,
-                                Remarks = $"Scanned at Fixed Reader ({matchedReader?.Name ?? resolvedReaderId}) [{movType}]."
+                                Remarks = $"Scanned at Fixed Reader ({matchedReader?.Name ?? resolvedReaderId}) Antenna #{eventAntennaId} [{movType}]."
                             };
                             _db.AssetMovements.Add(movement);
 
