@@ -259,23 +259,20 @@ namespace API.Controllers
                 };
                 _db.RfidScans.Add(scan);
 
-                if (sessionId != null)
+                var scanEvent = new ScanEvent
                 {
-                    var scanEvent = new ScanEvent
-                    {
-                        Id = Guid.NewGuid(),
-                        ScanSessionId = sessionId.Value,
-                        EpcCode = e.Epc,
-                        Timestamp = scanTs,
-                        Rssi = (int)e.Rssi,
-                        AntennaIndex = eventAntennaId,
-                        ReaderId = readerGuid,
-                        HandheldDeviceId = handheldGuid,
-                        Status = Domain.Enums.ScanStatus.Matched,
-                        CreatedOn = DateTime.UtcNow
-                    };
-                    _db.ScanEvents.Add(scanEvent);
-                }
+                    Id = Guid.NewGuid(),
+                    ScanSessionId = sessionId ?? scanId,
+                    EpcCode = e.Epc,
+                    Timestamp = scanTs,
+                    Rssi = (int)e.Rssi,
+                    AntennaIndex = eventAntennaId,
+                    ReaderId = readerGuid,
+                    HandheldDeviceId = handheldGuid,
+                    Status = Domain.Enums.ScanStatus.Matched,
+                    CreatedOn = DateTime.UtcNow
+                };
+                _db.ScanEvents.Add(scanEvent);
 
                 // If scanned by Entry or Exit reader, create AssetMovement & update Asset status
                 if (!string.IsNullOrEmpty(e.Epc))
