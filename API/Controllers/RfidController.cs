@@ -262,7 +262,7 @@ namespace API.Controllers
                 var scanEvent = new ScanEvent
                 {
                     Id = Guid.NewGuid(),
-                    ScanSessionId = sessionId ?? scanId,
+                    ScanSessionId = sessionId.Value,
                     EpcCode = e.Epc,
                     Timestamp = scanTs,
                     Rssi = (int)e.Rssi,
@@ -314,9 +314,10 @@ namespace API.Controllers
             await _db.SaveChangesAsync();
             return Ok(new { Count = batch.Events.Count });
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return Ok(new { Count = batch?.Events?.Count ?? 0, status = "processed" });
+                Console.WriteLine($"[INGEST ERROR] {ex.Message} -> {ex.InnerException?.Message}");
+                return Ok(new { Count = batch?.Events?.Count ?? 0, status = "processed", error = ex.Message });
             }
         }
 

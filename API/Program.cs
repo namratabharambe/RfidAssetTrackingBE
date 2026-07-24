@@ -97,6 +97,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+app.UseCors("AllowAll");
+
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -120,7 +122,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-app.UseCors("AllowAll");
 
 app.UseAuthentication();
 app.UseAuthorization();
