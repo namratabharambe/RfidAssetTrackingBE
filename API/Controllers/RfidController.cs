@@ -235,7 +235,7 @@ namespace API.Controllers
             // 3. Save RfidScan records and generate ScanEvents / AssetMovements
             foreach (var e in batch.Events)
             {
-                var scanId = e.ScanId == Guid.Empty ? Guid.NewGuid() : e.ScanId;
+                var scanId = (e.ScanId == Guid.Empty || await _db.RfidScans.AnyAsync(s => s.ScanId == e.ScanId)) ? Guid.NewGuid() : e.ScanId;
                 var scanTs = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime();
                 var eventAntennaId = e.GetParsedAntennaId() ?? batch.GetParsedAntennaId() ?? 1;
                 
