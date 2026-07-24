@@ -798,6 +798,69 @@ namespace API.Controllers
                         }
                     }
                 });
+            // ── WAREHOUSE GATE READERS: All fixed reader movements (CheckIn/CheckOut) ──
+            var fixedCheckoutTable = new List<object>();
+            var fixedCheckinTable = new List<object>();
+            DateTime? lastFixedCheckout = null;
+            DateTime? lastFixedCheckin = null;
+
+            foreach (var m in allExitMovements.Take(50))
+            {
+                var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                if (lastFixedCheckout == null || m.MovementDate > lastFixedCheckout) lastFixedCheckout = m.MovementDate;
+                fixedCheckoutTable.Add(new
+                {
+                    equipment = m.Asset?.Name ?? m.Asset?.AssetNumber ?? "Fixed Reader Asset",
+                    tagName = rfidTag?.EpcCode ?? "",
+                    equipmentType = "RFID_CHECKOUT",
+                    detected = "Yes",
+                    checkOutDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                    equipmentId = m.AssetId.ToString()
+                });
+            }
+
+            foreach (var m in allEntryMovements.Take(50))
+            {
+                var rfidTag = await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == m.AssetId);
+                if (lastFixedCheckin == null || m.MovementDate > lastFixedCheckin) lastFixedCheckin = m.MovementDate;
+                fixedCheckinTable.Add(new
+                {
+                    equipment = m.Asset?.Name ?? m.Asset?.AssetNumber ?? "Fixed Reader Asset",
+                    tagName = rfidTag?.EpcCode ?? "",
+                    equipmentType = "RFID_CHECKIN",
+                    gateStatus = "Matched",
+                    equipmentId = m.AssetId.ToString(),
+                    checkInDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss")
+                });
+            }
+
+            if (fixedCheckoutTable.Count > 0 || fixedCheckinTable.Count > 0)
+            {
+                resultTrucks.Insert(0, new
+                {
+                    truck = new
+                    {
+                        truckId = "Warehouse Gate Readers",
+                        truckNumber = "Fixed Readers Gate",
+                        driver = "Warehouse Exit/Entry Door"
+                    },
+                    checkOut = new
+                    {
+                        lastCheckoutTime = lastFixedCheckout?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                        table = fixedCheckoutTable
+                    },
+                    checkIn = new
+                    {
+                        lastCheckinTime = lastFixedCheckin?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                        table = fixedCheckinTable,
+                        summary = new
+                        {
+                            totalExpected = fixedCheckinTable.Count,
+                            totalDetected = fixedCheckinTable.Count,
+                            missingCount = 0
+                        }
+                    }
+                });
             }
 
             var firstSiteId = drivers.Any()
