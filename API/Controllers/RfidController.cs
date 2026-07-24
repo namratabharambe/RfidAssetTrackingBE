@@ -193,6 +193,20 @@ namespace API.Controllers
                 }
             }
 
+            // AntennaId / AntennaPort direction fallback mapping (Antenna 1/3 = Entry, Antenna 2/4 = Exit)
+            if (string.IsNullOrEmpty(isEntryOrExit))
+            {
+                int? antId = batch.AntennaId ?? batch.AntennaPort;
+                if (antId == null)
+                {
+                    var firstEvt = batch.Events.FirstOrDefault(e => e.AntennaId.HasValue || e.AntennaPort.HasValue || e.AntennaIndex.HasValue);
+                    antId = firstEvt?.AntennaId ?? firstEvt?.AntennaPort ?? firstEvt?.AntennaIndex;
+                }
+
+                if (antId == 1 || antId == 3) isEntryOrExit = "ENTRY";
+                else if (antId == 2 || antId == 4) isEntryOrExit = "EXIT";
+            }
+
             // 3. Save RfidScan records and generate ScanEvents / AssetMovements
             foreach (var e in batch.Events)
             {
@@ -1059,6 +1073,9 @@ namespace API.Controllers
     {
         public string? ReaderId { get; set; }
         public string? DeviceId { get; set; } // Support alternate fixed reader payloads
+        public int? AntennaId { get; set; } // Antenna port / index at batch level
+        public int? AntennaPort { get; set; }
+        public int? AntennaIndex { get; set; }
         public string SiteId { get; set; } = null!;
         public string? ScanMode { get; set; } // Support handheld checkin/checkout modes
         public string? OperatorName { get; set; }
@@ -1072,5 +1089,8 @@ namespace API.Controllers
         public double Rssi { get; set; }
         public DateTime Timestamp { get; set; }
         public string type { get; set; } = null!;
+        public int? AntennaId { get; set; } // Antenna port / index per event
+        public int? AntennaPort { get; set; }
+        public int? AntennaIndex { get; set; }
     }
 }
