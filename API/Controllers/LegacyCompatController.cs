@@ -874,6 +874,7 @@ namespace API.Controllers
                 trucks = resultTrucks
             });
         }
+    }
 
     public class LegacyLoginRequest
     {
@@ -913,6 +914,5 @@ namespace API.Controllers
         public string? driverId { get; set; }
         public string siteId { get; set; } = null!;
         public string? rfidTagId { get; set; }
-    }
     }
 }
