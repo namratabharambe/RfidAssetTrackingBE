@@ -58,6 +58,51 @@ namespace API.Controllers
         }
 
         [AllowAnonymous]
+        [HttpGet("api/admin/users/active-sessions/{userId}")]
+        public async Task<IActionResult> GetActiveSessions(string userId, [FromServices] AssetTrackingDbContext db)
+        {
+            var sites = await db.Sites.Where(s => !s.IsDeleted).ToListAsync();
+            var activeSites = sites.Select(s => new
+            {
+                siteId = s.Id.ToString(),
+                siteName = s.Name
+            }).ToList();
+
+            if (!activeSites.Any())
+            {
+                activeSites.Add(new { siteId = "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91", siteName = "Pune DC" });
+            }
+
+            return Ok(activeSites);
+        }
+
+        [AllowAnonymous]
+        [HttpGet("api/admin/users/active-site/{userId}")]
+        public async Task<IActionResult> GetActiveSite(string userId, [FromServices] AssetTrackingDbContext db)
+        {
+            var site = await db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+            var siteId = site?.Id.ToString() ?? "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91";
+            var siteName = site?.Name ?? "Pune DC";
+
+            return Ok(new
+            {
+                siteId = siteId,
+                siteName = siteName
+            });
+        }
+
+        [AllowAnonymous]
+        [HttpGet("api/admin/users/SiteWiseToken/{userId}/{siteId}")]
+        public async Task<IActionResult> GetSiteWiseToken(string userId, string siteId)
+        {
+            return Ok(new
+            {
+                token = "site_wise_token_" + Guid.NewGuid().ToString("N"),
+                siteId = siteId
+            });
+        }
+
+        [AllowAnonymous]
         [HttpGet("api/Trucks/trucksDropdown")]
         public async Task<IActionResult> GetTrucksDropdown([FromServices] AppDbContext db)
         {
@@ -436,10 +481,10 @@ namespace API.Controllers
                     .Select(r => r.Id)
                     .ToListAsync();
 
-                // ── All EXIT movements (checkout) ────────────────────────────────────────
+                // ── All EXIT movements (fixed reader checkout) ───────────────────────────
                 var allExitMovements = await db.AssetMovements
                     .Include(m => m.Asset)
-                    .Where(m => (m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value)) || (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKOUT") || m.MovementType.ToUpper().Contains("EXIT"))))
+                    .Where(m => (m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value)) || (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKOUT") || m.MovementType.ToUpper().Contains("EXIT")) && m.HandheldDeviceId == null && (m.Remarks == null || !m.Remarks.Contains("Handheld"))))
                     .OrderByDescending(m => m.MovementDate)
                     .ToListAsync();
 
@@ -502,8 +547,8 @@ namespace API.Controllers
                     {
                         equipment = m.Asset?.Name ?? m.Asset?.AssetNumber ?? "Unknown Equipment",
                         tagName = rfidTag?.EpcCode ?? "",
-                        equipmentType = "RFID_CHECKOUT",
-                        detected = "Yes",
+                        equipmentType = "FIXED_READER_EXIT",
+                        detected = "",
                         checkOutDate = m.MovementDate.ToString("yyyy-MM-dd HH:mm:ss"),
                         equipmentId = m.AssetId.ToString()
                     });
@@ -534,8 +579,8 @@ namespace API.Controllers
                         {
                             equipment = asset?.Name ?? "Unknown Equipment",
                             tagName = eq?.RfidTag?.TagName ?? "",
-                            equipmentType = a.Type ?? "EQUIPMENT",
-                            detected = "Yes",
+                            equipmentType = a.Type ?? "FIXED_READER_EXIT",
+                            detected = "",
                             checkOutDate = a.AssignedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                             equipmentId = a.EquipmentId.ToString()
                         });
@@ -694,6 +739,10 @@ namespace API.Controllers
                 string custodianName = group.Key;
                 if (coveredCustodians.Contains(custodianName)) continue;
                 if (custodianName == "Standalone Handheld Operator" || custodianName == "Handheld Operator") continue;
+                if (custodianName == "Fixed Reader Operator" || custodianName == "Fixed Reader Exit" || custodianName.Contains("Fixed Reader"))
+                {
+                    custodianName = "Warehouse Exit/Entry Door";
+                }
 
                 coveredCustodians.Add(custodianName);
 
@@ -707,19 +756,20 @@ namespace API.Controllers
                 foreach (var a in group)
                 {
                     var rfidTag = a.Asset != null ? await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.Asset.Id) : null;
-                    bool isReturned = a.ActualReturnDate != null || a.Status == "Returned" || a.Status == "Completed";
-                    bool isMissing = a.Status == "Missing" && !isReturned;
+                    
+                    bool isAutoCompleted = a.Status == "Completed" || (a.Notes != null && (a.Notes.Contains("Completed") || a.Notes.Contains("Handheld Inventory")));
+                    bool isReturned = a.ActualReturnDate != null || a.Status == "Returned";
+                    bool isMissing = a.Status == "Missing" || (a.Notes != null && a.Notes.Contains("Missing"));
 
                     var epc = rfidTag?.EpcCode ?? "";
 
-                    bool isAutoCompleted = a.Status == "Completed" || (a.Notes != null && a.Notes.Contains("Handheld Inventory"));
-                    string detectedStatus = isAutoCompleted ? "COMPLETED" : (isReturned ? "RETURNED" : (isMissing ? "MISSING" : ""));
+                    string detectedStatus = isAutoCompleted ? "COMPLETED" : (isReturned ? "RETURNED" : (isMissing ? "MISSING" : "-"));
 
                     checkoutTable.Add(new
                     {
                         equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                         tagName = epc,
-                        equipmentType = a.Notes != null && a.Notes.Contains("Driver") ? "DRIVER_CHECKOUT" : "INDIVIDUAL_CHECKOUT",
+                        equipmentType = (a.Notes != null && a.Notes.Contains("Fixed Reader Gate")) ? "FIXED_READER_EXIT" : "Handheld Reader",
                         detected = detectedStatus,
                         checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
                         equipmentId = a.AssetId.ToString()
@@ -734,7 +784,7 @@ namespace API.Controllers
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            equipmentType = "Handheld Reader",
                             gateStatus = "COMPLETED",
                             equipmentId = a.AssetId.ToString(),
                             checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss")
@@ -749,7 +799,7 @@ namespace API.Controllers
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            equipmentType = "Handheld Reader",
                             gateStatus = "RETURNED",
                             equipmentId = a.AssetId.ToString(),
                             checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
@@ -758,13 +808,13 @@ namespace API.Controllers
                         if (a.ActualReturnDate > lastCheckinTime)
                             lastCheckinTime = a.ActualReturnDate;
                     }
-                    else
+                    else if (isMissing && custodianName != "Warehouse Exit/Entry Door")
                     {
                         checkinTable.Add(new
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "INDIVIDUAL_CHECKIN",
+                            equipmentType = "Handheld Reader",
                             gateStatus = "MISSING",
                             equipmentId = a.AssetId.ToString(),
                             checkInDate = "-"

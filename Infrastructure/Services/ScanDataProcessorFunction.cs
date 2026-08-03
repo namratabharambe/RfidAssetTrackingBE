@@ -159,31 +159,27 @@ public class ScanDataProcessorFunction
         string direction = "ENTRY";
         if (reader != null)
         {
-            direction = reader.Direction?.Trim().ToUpperInvariant() ?? "ENTRY";
-            if (direction == "BOTH")
+            var dirStr = (reader.Direction ?? "").Trim().ToUpperInvariant();
+            var nameStr = (reader.Name ?? "").Trim().ToUpperInvariant();
+
+            if (dirStr == "EXIT" || nameStr.Contains("EXIT")) direction = "EXIT";
+            else if (dirStr == "ENTRY" || nameStr.Contains("ENTRY")) direction = "ENTRY";
+            else if (dirStr == "BOTH")
             {
                 var dirTruckId = scannedTruck?.TruckId ?? activeSession?.TruckId;
                 direction = await ResolveBothDirectionAsync(dirTruckId, equipments, siteId);
             }
         }
-        else
+
+        var firstScanObj = session.Scans.FirstOrDefault();
+        if (firstScanObj != null && !string.IsNullOrEmpty(firstScanObj.type))
         {
-            var firstScan = session.Scans.FirstOrDefault();
-            if (firstScan != null && firstScan.type != null)
-            {
-                if (firstScan.type.IndexOf("Exit", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    direction = "EXIT";
-                }
-                else if (firstScan.type.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    direction = "ENTRY";
-                }
-            }
+            if (firstScanObj.type.IndexOf("Exit", StringComparison.OrdinalIgnoreCase) >= 0) direction = "EXIT";
+            else if (firstScanObj.type.IndexOf("Entry", StringComparison.OrdinalIgnoreCase) >= 0) direction = "ENTRY";
         }
 
-        var isCheckout = direction == "ENTRY";
-        var eventType = isCheckout ? "Entry" : "Exit";
+        var isCheckout = direction == "EXIT";
+        var eventType = isCheckout ? "Exit" : "Entry";
 
         // 7. Flow Logic: Checkout (Entry) / Checkin (Exit)
         if (scannedTruck != null)
@@ -406,6 +402,26 @@ public class ScanDataProcessorFunction
                         existingLegacy.ActualReturnDate = now;
                         existingLegacy.Status = "Returned";
                         existingLegacy.Notes += "; Auto-returned via RFID Gate checkin";
+                    }
+                    else
+                    {
+                        var custodian = gate.TruckId != null 
+                            ? (await _db.Trucks.FindAsync(gate.TruckId))?.TruckNumber 
+                            : (gate.DriverId != null ? (await _db.Drivers.FindAsync(gate.DriverId))?.FullName : null);
+
+                        _db.AssetAssignments.Add(new AssetAssignment
+                        {
+                            Id = Guid.NewGuid(),
+                            AssetId = eq.EquipmentId,
+                            AssignedToUserId = adminUser.Id,
+                            CustodianName = custodian ?? "Warehouse Exit/Entry Door",
+                            AssignedDate = now,
+                            ExpectedReturnDate = now,
+                            ActualReturnDate = now,
+                            Purpose = "Fixed Reader Entry",
+                            Status = "Returned",
+                            Notes = "Auto-created via RFID Gate checkin"
+                        });
                     }
                 }
             }
@@ -685,8 +701,30 @@ public class ScanDataProcessorFunction
             .FirstOrDefaultAsync(t => t.SiteId == siteId && t.RfidTag != null && t.RfidTag.TagName != null && epcs.Contains(t.RfidTag.TagName.ToUpper()));
 
         var equipments = await _db.Equipment.Include(e => e.RfidTag)
-            .Where(e => e.SiteId == siteId && e.RfidTag != null && e.RfidTag.TagName != null && epcs.Contains(e.RfidTag.TagName.ToUpper()))
+            .Where(e => (e.SiteId == siteId || e.SiteId == Guid.Empty) && e.RfidTag != null && e.RfidTag.TagName != null && epcs.Contains(e.RfidTag.TagName.ToUpper()))
             .ToListAsync();
+
+        var matchedTags = await _db.RFIDTags
+            .Include(t => t.Asset)
+            .Where(t => t.AssetId != null && epcs.Contains(t.EpcCode.ToUpper()))
+            .ToListAsync();
+
+        foreach (var tag in matchedTags)
+        {
+            if (tag.Asset != null && !equipments.Any(e => e.EquipmentId == tag.Asset.Id))
+            {
+                equipments.Add(new Equipment
+                {
+                    EquipmentId = tag.Asset.Id,
+                    SiteId = tag.Asset.SiteId ?? siteId,
+                    RfidTag = new AssetTracking.Rfid.Domain.Entities.RfidTag
+                    {
+                        RfidTagId = tag.Id,
+                        TagName = tag.EpcCode
+                    }
+                });
+            }
+        }
 
         return (truck, equipments);
     }

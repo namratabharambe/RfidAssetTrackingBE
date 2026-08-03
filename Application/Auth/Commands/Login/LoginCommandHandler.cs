@@ -25,9 +25,13 @@ namespace Application.Auth.Commands.Login
 
         public async Task<LoginResponseDto> Handle(LoginCommand request, CancellationToken cancellationToken)
         {
+            var identity = (request.LoginDto.Username ?? request.LoginDto.Email ?? "").Trim().ToLower();
+            if (string.IsNullOrEmpty(identity))
+                throw new UnauthorizedAccessException("Invalid username or password.");
+
             var userRepo = _unitOfWork.Repository<User>();
             var users = await userRepo.GetFilteredAsync(
-                u => u.Username.ToLower() == request.LoginDto.Username.ToLower() || u.Email.ToLower() == request.LoginDto.Username.ToLower(), 
+                u => u.Username.ToLower() == identity || u.Email.ToLower() == identity, 
                 cancellationToken, 
                 u => u.UserRoles,
                 u => u.Site);
@@ -61,7 +65,7 @@ namespace Application.Auth.Commands.Login
             var secretKey = jwtSettings["Secret"] ?? "EnterpriseRFIDAssetTrackingGPSERPSecretKeySecretKey";
             var issuer = jwtSettings["Issuer"] ?? "TrackItAPI";
             var audience = jwtSettings["Audience"] ?? "TrackItClient";
-            var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "60");
+            var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "525600");
 
             var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes);
             

@@ -88,7 +88,13 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
+        policy.WithOrigins(
+                  "https://prosperassettracking.com",
+                  "http://prosperassettracking.com",
+                  "https://api.prosperassettracking.com",
+                  "http://localhost:4200"
+              )
+              .SetIsOriginAllowed(_ => true)
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();
@@ -106,21 +112,26 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-using (var scope = app.Services.CreateScope())
+// Custom Preflight OPTIONS Handler to prevent server CORS blockage
+app.Use(async (context, next) =>
 {
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    try
+    var origin = context.Request.Headers["Origin"].ToString();
+    if (!string.IsNullOrEmpty(origin))
     {
-        var dbContext = scope.ServiceProvider.GetRequiredService<AssetTrackingDbContext>();
-        dbContext.Database.Migrate();
-        await DatabaseSeeder.SeedAsync(dbContext);
-        logger.LogInformation("Database migration and seeding completed successfully.");
+        context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+        context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+        context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin";
+        context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
     }
-    catch (Exception ex)
+
+    if (context.Request.Method == "OPTIONS")
     {
-        logger.LogError(ex, "An error occurred while migrating or seeding the database on startup.");
+        context.Response.StatusCode = 200;
+        await context.Response.CompleteAsync();
+        return;
     }
-}
+    await next();
+});
 
 
 app.UseAuthentication();

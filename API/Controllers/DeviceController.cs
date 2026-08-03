@@ -245,7 +245,7 @@ namespace API.Controllers
         {
             var sessionRepo = _unitOfWork.Repository<ScanSession>();
             var sessions = await sessionRepo.GetFilteredAsync(
-                s => s.HandheldDeviceId != null,
+                s => true,
                 cancellationToken,
                 s => s.HandheldDevice.AssignedUser,
                 s => s.ScanEvents);

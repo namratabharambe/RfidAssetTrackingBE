@@ -80,7 +80,7 @@ namespace Infrastructure.Services
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 Token = Convert.ToBase64String(bytes),
-                Expires = DateTime.UtcNow.AddDays(7),
+                Expires = DateTime.UtcNow.AddYears(1),
                 Created = DateTime.UtcNow,
                 CreatedByIp = ipAddress
             };
