@@ -247,7 +247,135 @@ namespace Infrastructure.Services
                                          }
                                          else
                                          {
-                                             _logger.LogWarning($"ScanProcessor: No ActiveTruckSession found for Reader {reader.Id} and Site {reader.SiteId}. Handheld logic skipped.");
+                                              _logger.LogInformation($"ScanProcessor: Fixed reader scan without active truck session. Reader: {reader.Name}, Direction: {reader.Direction}, Antenna: {scanEvent.AntennaIndex}");
+                                              var isExit = (reader.Direction != null && reader.Direction.Trim().ToUpperInvariant() == "EXIT") || scanEvent.AntennaIndex == 1 || scanEvent.AntennaIndex == 2;
+                                              var isEntry = (reader.Direction != null && reader.Direction.Trim().ToUpperInvariant() == "ENTRY") || scanEvent.AntennaIndex == 4 || scanEvent.AntennaIndex == 3;
+
+                                              if (isExit)
+                                              {
+                                                  var existingAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                      .GetFilteredAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null, stoppingToken);
+
+                                                  if (!existingAssignments.Any())
+                                                  {
+                                                      var defaultUser = await dbContext.Users.FirstOrDefaultAsync(stoppingToken);
+                                                      var newAssignment = new AssetAssignment
+                                                      {
+                                                          Id = Guid.NewGuid(),
+                                                          AssetId = asset.Id,
+                                                          AssignedToUserId = defaultUser?.Id ?? Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"),
+                                                          CustodianName = "Warehouse Exit/Entry Door",
+                                                          AssignedDate = scanEvent.Timestamp,
+                                                          ExpectedReturnDate = scanEvent.Timestamp.AddDays(1),
+                                                          Status = "Active",
+                                                          Purpose = "Fixed Reader Exit",
+                                                          Notes = $"Checked out via Fixed Reader Exit (Antenna 1). Reader: {reader.Name}."
+                                                      };
+                                                      await unitOfWork.Repository<AssetAssignment>().AddAsync(newAssignment, stoppingToken);
+                                                      asset.Status = AssetStatus.Assigned;
+                                                      asset.SiteId = reader.SiteId;
+                                                      assetRepo.Update(asset);
+
+                                                      var exitMovement = new AssetMovement
+                                                      {
+                                                          Id = Guid.NewGuid(),
+                                                          AssetId = asset.Id,
+                                                          MovementType = "Exit",
+                                                          MovementDate = scanEvent.Timestamp,
+                                                          ReaderId = reader.Id,
+                                                          Remarks = $"Checked out via Fixed Reader Exit (Antenna 1). Reader: {reader.Name}."
+                                                      };
+                                                      await unitOfWork.Repository<AssetMovement>().AddAsync(exitMovement, stoppingToken);
+                                                  }
+                                              }
+                                              else if (isEntry)
+                                              {
+                                                  var existingAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                      .GetFilteredAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null, stoppingToken);
+
+                                                  if (existingAssignments.Any())
+                                                  {
+                                                      foreach (var a in existingAssignments)
+                                                      {
+                                                          a.ActualReturnDate = scanEvent.Timestamp;
+                                                          a.Status = "Returned";
+                                                          a.Notes = $"Checked in via Fixed Reader Entry (Antenna 4). Status: Found (RETURNED). Reader: {reader.Name}.";
+                                                          unitOfWork.Repository<AssetAssignment>().Update(a);
+                                                      }
+                                                  }
+                                                  else
+                                                  {
+                                                      var defaultUser = await dbContext.Users.FirstOrDefaultAsync(stoppingToken);
+                                                      var newAssignment = new AssetAssignment
+                                                      {
+                                                          Id = Guid.NewGuid(),
+                                                          AssetId = asset.Id,
+                                                          AssignedToUserId = defaultUser?.Id ?? Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"),
+                                                          CustodianName = "Warehouse Exit/Entry Door",
+                                                          AssignedDate = scanEvent.Timestamp,
+                                                          ActualReturnDate = scanEvent.Timestamp,
+                                                          Status = "Returned",
+                                                          Purpose = "Fixed Reader Entry",
+                                                          Notes = $"Checked in via Fixed Reader Entry (Antenna 4). Status: Found (RETURNED). Reader: {reader.Name}."
+                                                      };
+                                                      await unitOfWork.Repository<AssetAssignment>().AddAsync(newAssignment, stoppingToken);
+                                                  }
+
+                                                  asset.Status = AssetStatus.Available;
+                                                  asset.SiteId = reader.SiteId;
+                                                  assetRepo.Update(asset);
+
+                                                  var entryMovement = new AssetMovement
+                                                  {
+                                                      Id = Guid.NewGuid(),
+                                                      AssetId = asset.Id,
+                                                      MovementType = "Checkin",
+                                                      MovementDate = scanEvent.Timestamp,
+                                                      ReaderId = reader.Id,
+                                                      Remarks = $"Checked in via Fixed Reader Entry (Antenna 4). Status: Found (RETURNED)."
+                                                  };
+                                                  await unitOfWork.Repository<AssetMovement>().AddAsync(entryMovement, stoppingToken);
+
+                                                  var allOpenAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                                      .GetFilteredAsync(a => a.ActualReturnDate == null && a.Status == "Active", stoppingToken, a => a.Asset);
+
+                                                  foreach (var a in allOpenAssignments.Where(a => a.AssetId != asset.Id))
+                                                  {
+                                                      var assetTag = await rfidTagRepo.GetFilteredAsync(t => t.AssetId == a.AssetId, stoppingToken);
+                                                      var epcCode = assetTag.FirstOrDefault()?.EpcCode;
+                                                      if (epcCode != null)
+                                                      {
+                                                          var scannedInSession = await scanEventRepo.GetFilteredAsync(x =>
+                                                              x.ScanSessionId == scanEvent.ScanSessionId &&
+                                                              x.EpcCode.Replace(" ", "").ToLower() == epcCode.Replace(" ", "").ToLower(), stoppingToken);
+
+                                                          if (!scannedInSession.Any())
+                                                          {
+                                                              a.Status = "Missing";
+                                                              a.Notes = "Not detected during Fixed Reader Entry (Antenna 4) scan. Status: Missing.";
+                                                              unitOfWork.Repository<AssetAssignment>().Update(a);
+
+                                                              var ass = await assetRepo.GetByIdAsync(a.AssetId, stoppingToken);
+                                                              if (ass != null)
+                                                              {
+                                                                  ass.Status = AssetStatus.Retired;
+                                                                  assetRepo.Update(ass);
+                                                              }
+
+                                                              var missingMovement = new AssetMovement
+                                                              {
+                                                                  Id = Guid.NewGuid(),
+                                                                  AssetId = a.AssetId,
+                                                                  MovementType = "Missing",
+                                                                  MovementDate = scanEvent.Timestamp,
+                                                                  ReaderId = reader.Id,
+                                                                  Remarks = "Not detected during Fixed Reader Entry (Antenna 4) scan. Status: Missing."
+                                                              };
+                                                              await unitOfWork.Repository<AssetMovement>().AddAsync(missingMovement, stoppingToken);
+                                                          }
+                                                      }
+                                                  }
+                                              }
                                          }
                                      }
                                  }
@@ -611,7 +739,35 @@ namespace Infrastructure.Services
                                 }
                             }
 
-                            var movement = new AssetMovement
+                             // Reconcile missing assignments and cases when tag is detected during inventory/audit/reader scans
+                             var missingAssignments = await unitOfWork.Repository<AssetAssignment>()
+                                 .GetFilteredAsync(a => a.AssetId == asset.Id && a.Status == "Missing", stoppingToken);
+
+                             foreach (var missingAss in missingAssignments)
+                             {
+                                 missingAss.Status = "Completed";
+                                 missingAss.ActualReturnDate = scanEvent.Timestamp;
+                                 missingAss.Notes = $"Missing asset recovered via inventory scan. Status: COMPLETED. Timestamp: {scanEvent.Timestamp}.";
+                                 unitOfWork.Repository<AssetAssignment>().Update(missingAss);
+                             }
+
+                             if (asset.Status == AssetStatus.Retired)
+                             {
+                                 asset.Status = AssetStatus.Available;
+                                 assetRepo.Update(asset);
+                             }
+
+                             var openCaseItems = await dbContext.MissingEquipmentCaseItems
+                                 .Where(i => i.EquipmentId == asset.Id && !i.IsRecovered)
+                                 .ToListAsync(stoppingToken);
+
+                             foreach (var caseItem in openCaseItems)
+                             {
+                                 caseItem.IsRecovered = true;
+                                 caseItem.RecoveredAt = scanEvent.Timestamp;
+                             }
+
+                             var movement = new AssetMovement
                             {
                                 Id = Guid.NewGuid(),
                                 AssetId = asset.Id,

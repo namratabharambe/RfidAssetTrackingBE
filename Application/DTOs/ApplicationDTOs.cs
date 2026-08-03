@@ -26,7 +26,7 @@ namespace Application.DTOs
     }
     public record CreateUserDto(string Username, string Email, string Password, List<Guid> RoleIds, Guid? SiteId = null);
     public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid> RoleIds, Guid? SiteId = null);
-    public record LoginDto(string Username, string Password);
+    public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
     public record RefreshTokenDto(string Token, string RefreshToken);
     public record ForgotPasswordDto(string Email);

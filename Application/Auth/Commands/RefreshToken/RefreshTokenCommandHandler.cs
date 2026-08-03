@@ -55,7 +55,7 @@ namespace Application.Auth.Commands.RefreshToken
             var secretKey = jwtSettings["Secret"] ?? "EnterpriseRFIDAssetTrackingGPSERPSecretKeySecretKey";
             var issuer = jwtSettings["Issuer"] ?? "TrackItAPI";
             var audience = jwtSettings["Audience"] ?? "TrackItClient";
-            var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "60");
+            var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "525600");
 
             var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes);
 

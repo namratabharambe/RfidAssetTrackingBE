@@ -450,6 +450,20 @@ namespace API.Controllers
     public class GPSDevicesController : CrudControllerBase<GPSDevice, GPSDeviceDto, CreateGPSDeviceDto>
     {
         public GPSDevicesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [AllowAnonymous]
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<GPSDeviceDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<GPSDevice>();
+            var (items, total) = await repo.GetPagedAsync(page, size, search, null, null, cancellationToken);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<GPSDeviceDto>>(items));
+        }
     }
 
 
@@ -509,11 +523,25 @@ namespace API.Controllers
                 if (dtos.Any(d => d.Id == m.Id || (d.AssetId == m.AssetId && d.AssignedDate == m.MovementDate)))
                     continue;
 
-                var isReturned = string.Equals(m.MovementType, "Checkin", StringComparison.OrdinalIgnoreCase) ||
-                                 string.Equals(m.MovementType, "Return", StringComparison.OrdinalIgnoreCase);
+                bool isAntenna1Exit = m.Remarks != null && (m.Remarks.Contains("Antenna #1") || m.Remarks.Contains("Antenna 1") || m.Remarks.ToLower().Contains("exit"));
 
-                var deviceName = m.HandheldDevice?.Name ?? "Handheld RFID Reader";
-                var remarks = m.Remarks ?? "Scanned automatically at RFID Reader.";
+                bool isExit = isAntenna1Exit ||
+                              string.Equals(m.MovementType, "Checkout", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(m.MovementType, "Exit", StringComparison.OrdinalIgnoreCase) ||
+                              (m.MovementType != null && m.MovementType.ToUpper().Contains("EXIT"));
+
+                bool isReturned = !isExit && (
+                                  string.Equals(m.MovementType, "Checkin", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(m.MovementType, "Return", StringComparison.OrdinalIgnoreCase) ||
+                                  (m.MovementType != null && m.MovementType.ToUpper().Contains("CHECKIN")));
+
+                var deviceName = m.HandheldDevice?.Name;
+                if (string.IsNullOrEmpty(deviceName) || deviceName == "Handheld RFID Reader" || isExit)
+                {
+                    deviceName = "Warehouse Exit/Entry Door";
+                }
+
+                var remarks = m.Remarks ?? (isExit ? "Checked out via Fixed Reader Exit (Antenna 1)." : "Scanned automatically at RFID Reader.");
 
                 dtos.Add(new AssetAssignmentDto
                 {
@@ -527,7 +555,7 @@ namespace API.Controllers
                     AssignedDate = m.MovementDate,
                     ExpectedReturnDate = isReturned ? null : m.MovementDate.AddDays(1),
                     ActualReturnDate = isReturned ? m.MovementDate : null,
-                    Purpose = m.MovementType ?? "Checkout",
+                    Purpose = isExit ? "Fixed Reader Exit" : (m.MovementType ?? "Checkout"),
                     Status = isReturned ? "Returned" : "Active",
                     Notes = remarks
                 });
@@ -619,6 +647,7 @@ namespace API.Controllers
     {
         public AssetMovementsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
+        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<AssetMovementDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -682,6 +711,20 @@ namespace API.Controllers
     public class AlertsController : CrudControllerBase<Alert, AlertDto, AlertDto>
     {
         public AlertsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [AllowAnonymous]
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<AlertDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Alert>();
+            var (items, total) = await repo.GetPagedAsync(page, size, search, null, null, cancellationToken);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<AlertDto>>(items));
+        }
     }
 
     [Authorize]
@@ -698,5 +741,29 @@ namespace API.Controllers
     public class ScanSessionsController : CrudControllerBase<ScanSession, ScanSessionDto, CreateScanSessionDto>
     {
         public ScanSessionsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [AllowAnonymous]
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<ScanSessionDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 10,
+            [FromQuery] string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<ScanSession>();
+            var filter = GetSiteFilterExpression();
+            var (items, total) = await repo.GetPagedAsync(
+                page,
+                size,
+                search,
+                filter,
+                null,
+                cancellationToken,
+                x => x.Reader,
+                x => x.HandheldDevice,
+                x => x.ScanEvents);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<ScanSessionDto>>(items));
+        }
     }
 }

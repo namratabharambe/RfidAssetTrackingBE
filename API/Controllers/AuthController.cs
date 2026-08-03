@@ -35,7 +35,11 @@ namespace API.Controllers
             }
             catch (System.UnauthorizedAccessException ex)
             {
-                return Unauthorized(ex.Message);
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Database or Server Login Error: {ex.Message}", detail = ex.InnerException?.Message });
             }
         }
 
@@ -97,6 +101,14 @@ namespace API.Controllers
                 {
                     return Unauthorized(new { message = ex2.Message });
                 }
+                catch (Exception ex2)
+                {
+                    return StatusCode(500, new { message = $"Database or Server Login Error: {ex2.Message}", detail = ex2.InnerException?.Message });
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Database or Server Login Error: {ex.Message}", detail = ex.InnerException?.Message });
             }
         }
 

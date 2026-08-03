@@ -163,50 +163,49 @@ namespace API.Controllers
                 matchedReader = await _db.Readers.FirstOrDefaultAsync(r => r.Name == resolvedReaderId || r.IpAddress == resolvedReaderId || r.Id.ToString() == resolvedReaderId);
             }
 
-            if (matchedReader != null)
+            // Priority 1: AntennaId / AntennaPort direction mapping (Antenna 1 & 2 = Exit, Antenna 3 & 4 = Entry)
+            int? parsedAntId = batch.GetParsedAntennaId();
+            if (parsedAntId == null)
             {
-                var dirStr = (matchedReader.Direction ?? "").ToUpper();
-                var nameStr = (matchedReader.Name ?? "").ToUpper();
-                if (dirStr == "EXIT" || nameStr.Contains("EXIT")) isEntryOrExit = "EXIT";
-                else if (dirStr == "ENTRY" || nameStr.Contains("ENTRY")) isEntryOrExit = "ENTRY";
+                var firstEvt = batch.Events.FirstOrDefault(e => e.GetParsedAntennaId().HasValue);
+                parsedAntId = firstEvt?.GetParsedAntennaId();
             }
-            
+
+            if (parsedAntId == 1 || parsedAntId == 2) isEntryOrExit = "EXIT";
+            else if (parsedAntId == 3 || parsedAntId == 4) isEntryOrExit = "ENTRY";
+
+            // Priority 2: ScanMode override
             if (string.IsNullOrEmpty(isEntryOrExit) && !string.IsNullOrEmpty(batch.ScanMode))
             {
                 if (batch.ScanMode.ToUpper().Contains("EXIT")) isEntryOrExit = "EXIT";
                 else if (batch.ScanMode.ToUpper().Contains("ENTRY")) isEntryOrExit = "ENTRY";
             }
 
+            // Priority 3: Matched Reader Direction/Name fallback
+            if (string.IsNullOrEmpty(isEntryOrExit) && matchedReader != null)
+            {
+                var dirStr = (matchedReader.Direction ?? "").ToUpper();
+                var nameStr = (matchedReader.Name ?? "").ToUpper();
+                if (dirStr == "EXIT" || nameStr.Contains("EXIT")) isEntryOrExit = "EXIT";
+                else if (dirStr == "ENTRY" || nameStr.Contains("ENTRY")) isEntryOrExit = "ENTRY";
+            }
+
             // Numeric or custom ReaderId fallback mapping ("1", "2", "3", "4", "Reader 1", etc.)
             if (string.IsNullOrEmpty(isEntryOrExit) && !string.IsNullOrEmpty(resolvedReaderId))
             {
                 var rClean = resolvedReaderId.Trim().ToLower();
-                if (rClean == "1" || rClean == "3" || rClean.Contains("entry") || rClean.Contains("in") || rClean.Contains("reader 1") || rClean.Contains("reader 3") || rClean.Contains("door 1"))
-                {
-                    isEntryOrExit = "ENTRY";
-                    if (matchedReader == null)
-                        matchedReader = await _db.Readers.FirstOrDefaultAsync(r => (r.Name != null && r.Name.ToLower().Contains("entry")) || (r.Direction != null && r.Direction.ToLower() == "entry"));
-                }
-                else if (rClean == "2" || rClean == "4" || rClean.Contains("exit") || rClean.Contains("out") || rClean.Contains("reader 2") || rClean.Contains("reader 4") || rClean.Contains("door 2"))
+                if (rClean == "1" || rClean.Contains("exit") || rClean.Contains("out") || rClean.Contains("reader 1") || rClean.Contains("door 1"))
                 {
                     isEntryOrExit = "EXIT";
                     if (matchedReader == null)
                         matchedReader = await _db.Readers.FirstOrDefaultAsync(r => (r.Name != null && r.Name.ToLower().Contains("exit")) || (r.Direction != null && r.Direction.ToLower() == "exit"));
                 }
-            }
-
-            // AntennaId / AntennaPort direction fallback mapping (Antenna 1/3 = Entry, Antenna 2/4 = Exit)
-            if (string.IsNullOrEmpty(isEntryOrExit))
-            {
-                int? antId = batch.GetParsedAntennaId();
-                if (antId == null)
+                else if (rClean == "4" || rClean.Contains("entry") || rClean.Contains("in") || rClean.Contains("reader 4") || rClean.Contains("door 4"))
                 {
-                    var firstEvt = batch.Events.FirstOrDefault(e => e.GetParsedAntennaId().HasValue);
-                    antId = firstEvt?.GetParsedAntennaId();
+                    isEntryOrExit = "ENTRY";
+                    if (matchedReader == null)
+                        matchedReader = await _db.Readers.FirstOrDefaultAsync(r => (r.Name != null && r.Name.ToLower().Contains("entry")) || (r.Direction != null && r.Direction.ToLower() == "entry"));
                 }
-
-                if (antId == 1 || antId == 3) isEntryOrExit = "ENTRY";
-                else if (antId == 2 || antId == 4) isEntryOrExit = "EXIT";
             }
 
             var resolvedSiteId = batch.SiteId;
@@ -232,17 +231,20 @@ namespace API.Controllers
                 }
             }
 
-            // 3. Save RfidScan records and generate ScanEvents / AssetMovements
+            // 3. Save RfidScan records and generate ScanEvents / AssetMovements / AssetAssignments
             foreach (var e in batch.Events)
             {
                 var scanId = (e.ScanId == Guid.Empty || await _db.RfidScans.AnyAsync(s => s.ScanId == e.ScanId)) ? Guid.NewGuid() : e.ScanId;
                 var scanTs = e.Timestamp == default ? DateTime.UtcNow : e.Timestamp.ToUniversalTime();
                 var eventAntennaId = e.GetParsedAntennaId() ?? batch.GetParsedAntennaId() ?? 1;
                 
+                string eventDir = (eventAntennaId == 1 || eventAntennaId == 2) ? "EXIT" : ((eventAntennaId == 3 || eventAntennaId == 4) ? "ENTRY" : isEntryOrExit);
+                if (string.IsNullOrEmpty(eventDir)) eventDir = "EXIT";
+
                 var scanTypeStr = string.IsNullOrEmpty(batch.ScanMode) ? e.type : $"{e.type}|{batch.ScanMode}";
-                if (!string.IsNullOrEmpty(isEntryOrExit) && !scanTypeStr.ToUpper().Contains(isEntryOrExit))
+                if (!scanTypeStr.ToUpper().Contains("EXIT") && !scanTypeStr.ToUpper().Contains("ENTRY"))
                 {
-                    scanTypeStr = $"{scanTypeStr}|{isEntryOrExit}";
+                    scanTypeStr = $"{scanTypeStr}|{eventDir}";
                 }
                 scanTypeStr = $"{scanTypeStr}|Antenna:{eventAntennaId}";
 
@@ -274,7 +276,7 @@ namespace API.Controllers
                 };
                 _db.ScanEvents.Add(scanEvent);
 
-                // If scanned by Entry or Exit reader, create AssetMovement & update Asset status
+                // If scanned by Entry or Exit reader, create AssetMovement & update Asset status and AssetAssignment
                 if (!string.IsNullOrEmpty(e.Epc))
                 {
                     var cleanEpc = e.Epc.Trim().ToLower();
@@ -284,7 +286,7 @@ namespace API.Controllers
                         var asset = await _db.Assets.FindAsync(tag.AssetId.Value);
                         if (asset != null)
                         {
-                            string movType = isEntryOrExit == "EXIT" ? "CheckOut" : (isEntryOrExit == "ENTRY" ? "CheckIn" : "FixedReaderScan");
+                            string movType = (isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2) ? "CheckOut" : ((isEntryOrExit == "ENTRY" || eventAntennaId == 3 || eventAntennaId == 4) ? "CheckIn" : "FixedReaderScan");
                             var movement = new AssetMovement
                             {
                                 Id = Guid.NewGuid(),
@@ -296,15 +298,83 @@ namespace API.Controllers
                             };
                             _db.AssetMovements.Add(movement);
 
-                            if (isEntryOrExit == "EXIT")
+                            if (isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2)
                             {
                                 asset.Status = Domain.Enums.AssetStatus.Assigned;
                                 _db.Assets.Update(asset);
+
+                                var existingAssignment = await _db.AssetAssignments
+                                    .FirstOrDefaultAsync(a => a.AssetId == asset.Id && a.ActualReturnDate == null && !a.IsDeleted);
+
+                                if (existingAssignment == null)
+                                {
+                                    var defaultUser = await _db.Users.FirstOrDefaultAsync();
+                                    string custodian = !string.IsNullOrWhiteSpace(batch.OperatorName) 
+                                        ? batch.OperatorName 
+                                        : (handheldGuid != null) 
+                                            ? "Handheld Reader" 
+                                            : "EXIT";
+
+                                    string purposeType = (handheldGuid != null) 
+                                        ? "Handheld Reader" 
+                                        : "READER";
+
+                                    var newAssignment = new AssetAssignment
+                                    {
+                                        Id = Guid.NewGuid(),
+                                        AssetId = asset.Id,
+                                        AssignedToUserId = defaultUser?.Id ?? Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"),
+                                        CustodianName = custodian,
+                                        AssignedDate = scanTs,
+                                        ExpectedReturnDate = scanTs.AddDays(1),
+                                        Purpose = purposeType,
+                                        Status = "Active",
+                                        Notes = $"Checked out via {purposeType}. Operator: {custodian}."
+                                    };
+                                    _db.AssetAssignments.Add(newAssignment);
+                                }
                             }
-                            else if (isEntryOrExit == "ENTRY")
+                            else if (isEntryOrExit == "ENTRY" || eventAntennaId == 3 || eventAntennaId == 4)
                             {
                                 asset.Status = Domain.Enums.AssetStatus.Available;
                                 _db.Assets.Update(asset);
+
+                                var openAssignments = await _db.AssetAssignments
+                                    .Where(a => a.AssetId == asset.Id && a.ActualReturnDate == null && !a.IsDeleted)
+                                    .ToListAsync();
+
+                                if (openAssignments.Any())
+                                {
+                                    foreach (var openAss in openAssignments)
+                                    {
+                                        openAss.ActualReturnDate = scanTs;
+                                        openAss.Status = "Returned";
+                                        openAss.Notes = $"Checked in via Fixed Reader Entry (Antenna #{eventAntennaId}). Status: Found (RETURNED).";
+                                        _db.AssetAssignments.Update(openAss);
+                                    }
+                                }
+                                else
+                                {
+                                    var defaultUser = await _db.Users.FirstOrDefaultAsync();
+                                    string custodian = !string.IsNullOrWhiteSpace(batch.OperatorName) 
+                                        ? batch.OperatorName 
+                                        : "ENTRY";
+
+                                    var newReturnAssignment = new AssetAssignment
+                                    {
+                                        Id = Guid.NewGuid(),
+                                        AssetId = asset.Id,
+                                        AssignedToUserId = defaultUser?.Id ?? Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c6d"),
+                                        CustodianName = custodian,
+                                        AssignedDate = scanTs,
+                                        ExpectedReturnDate = scanTs,
+                                        ActualReturnDate = scanTs,
+                                        Purpose = "READER",
+                                        Status = "Returned",
+                                        Notes = $"Checked in via Fixed Reader Entry (Antenna #{eventAntennaId}). Status: Found (RETURNED)."
+                                    };
+                                    _db.AssetAssignments.Add(newReturnAssignment);
+                                }
                             }
                         }
                     }
@@ -605,7 +675,7 @@ namespace API.Controllers
 
                         // Automatically update any Missing or CheckedOut status in Check-In / Check-Out (AssetAssignments)
                         var assignmentsToUpdate = await _db.AssetAssignments
-                            .Where(a => a.AssetId == asset.Id && (a.Status == "Missing" || a.Status == "CheckedOut" || a.ActualReturnDate == null))
+                            .Where(a => a.AssetId == asset.Id && (a.Status == "Missing" || a.Status == "Active" || a.Status == "CheckedOut" || a.ActualReturnDate == null))
                             .ToListAsync();
 
                         foreach (var assign in assignmentsToUpdate)
