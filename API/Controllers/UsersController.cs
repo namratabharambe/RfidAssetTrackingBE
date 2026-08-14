@@ -32,6 +32,7 @@ namespace API.Controllers
             _authService = authService;
         }
 
+        [AllowAnonymous]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
         {
@@ -63,6 +64,7 @@ namespace API.Controllers
             return Ok(_mapper.Map<UserDto>(user));
         }
 
+        [AllowAnonymous]
         [HttpPost]
         public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserDto createDto, CancellationToken cancellationToken)
         {

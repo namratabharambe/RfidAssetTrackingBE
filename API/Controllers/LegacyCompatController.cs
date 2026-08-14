@@ -738,7 +738,6 @@ namespace API.Controllers
             {
                 string custodianName = group.Key;
                 if (coveredCustodians.Contains(custodianName)) continue;
-                if (custodianName == "Standalone Handheld Operator" || custodianName == "Handheld Operator") continue;
                 if (custodianName == "Fixed Reader Operator" || custodianName == "Fixed Reader Exit" || custodianName.Contains("Fixed Reader"))
                 {
                     custodianName = "Warehouse Exit/Entry Door";
@@ -753,6 +752,18 @@ namespace API.Controllers
                 int totalDetected = 0;
                 int missingCount = 0;
 
+                // Map total scan occurrences per tag to distinguish 1st scan (-) vs 2nd scan (RETURNED)
+                var tagScanCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in group)
+                {
+                    var rfidTag = item.Asset != null ? await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == item.Asset.Id) : null;
+                    var tagEpc = rfidTag?.EpcCode ?? item.Asset?.AssetNumber ?? item.AssetId.ToString();
+                    if (!string.IsNullOrEmpty(tagEpc))
+                    {
+                        tagScanCounts[tagEpc] = tagScanCounts.GetValueOrDefault(tagEpc, 0) + 1;
+                    }
+                }
+
                 foreach (var a in group)
                 {
                     var rfidTag = a.Asset != null ? await db.RFIDTags.FirstOrDefaultAsync(rt => rt.AssetId == a.Asset.Id) : null;
@@ -762,21 +773,43 @@ namespace API.Controllers
                     bool isMissing = a.Status == "Missing" || (a.Notes != null && a.Notes.Contains("Missing"));
 
                     var epc = rfidTag?.EpcCode ?? "";
+                    var tagKey = !string.IsNullOrEmpty(epc) ? epc : (a.Asset?.AssetNumber ?? a.AssetId.ToString());
+                    int scanCount = tagScanCounts.GetValueOrDefault(tagKey, 1);
 
-                    string detectedStatus = isAutoCompleted ? "COMPLETED" : (isReturned ? "RETURNED" : (isMissing ? "MISSING" : "-"));
+                    string pur = (a.Purpose ?? "").ToLower();
+                    string nts = (a.Notes ?? "").ToLower();
+                    string cust = (custodianName ?? "").ToLower();
 
-                    checkoutTable.Add(new
+                    bool isEntryAssignment = pur.Contains("entry") || cust.Contains("entry") || nts.Contains("entry");
+
+                    bool isHandheld = pur.Contains("handheld") || cust.Contains("handheld") || nts.Contains("handheld") || cust.Contains("operator");
+                    bool isFixedReader = !isHandheld && (pur.Contains("fixed") || pur.Contains("reader") || nts.Contains("fixed") || nts.Contains("reader") || cust.Contains("exit") || cust.Contains("entry") || cust.Contains("door") || cust.Contains("gate"));
+                    string rowEquipmentType = isHandheld ? "Handheld Reader" : "READER";
+
+                    // 1st scan of any tag -> "-" (dash); 2nd scan of same tag -> RETURNED for Fixed Reader, COMPLETED/MISSING for Handheld Reader
+                    string detectedStatus = (scanCount >= 2) 
+                        ? (isFixedReader ? "RETURNED" : (isAutoCompleted ? "COMPLETED" : (isMissing ? "MISSING" : "RETURNED"))) 
+                        : "-";
+
+                    if (!isEntryAssignment)
                     {
-                        equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
-                        tagName = epc,
-                        equipmentType = (a.Notes != null && a.Notes.Contains("Fixed Reader Gate")) ? "FIXED_READER_EXIT" : "Handheld Reader",
-                        detected = detectedStatus,
-                        checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
-                        equipmentId = a.AssetId.ToString()
-                    });
+                        checkoutTable.Add(new
+                        {
+                            equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
+                            tagName = epc,
+                            equipmentType = rowEquipmentType,
+                            detected = detectedStatus,
+                            checkOutDate = a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss"),
+                            equipmentId = a.AssetId.ToString()
+                        });
 
-                    if (lastCheckoutTime == null || a.AssignedDate > lastCheckoutTime)
-                        lastCheckoutTime = a.AssignedDate;
+                        if (lastCheckoutTime == null || a.AssignedDate > lastCheckoutTime)
+                            lastCheckoutTime = a.AssignedDate;
+                    }
+
+                    string gateStatusVal = (scanCount >= 2) 
+                        ? (isFixedReader ? "RETURNED" : (isAutoCompleted ? "COMPLETED" : (isMissing ? "MISSING" : "RETURNED"))) 
+                        : "-";
 
                     if (isAutoCompleted)
                     {
@@ -784,8 +817,8 @@ namespace API.Controllers
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "Handheld Reader",
-                            gateStatus = "COMPLETED",
+                            equipmentType = rowEquipmentType,
+                            gateStatus = gateStatusVal,
                             equipmentId = a.AssetId.ToString(),
                             checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss")
                         });
@@ -793,18 +826,18 @@ namespace API.Controllers
                         if (a.ActualReturnDate > lastCheckinTime)
                             lastCheckinTime = a.ActualReturnDate;
                     }
-                    else if (isReturned)
+                    else if (isReturned || isEntryAssignment)
                     {
                         checkinTable.Add(new
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "Handheld Reader",
-                            gateStatus = "RETURNED",
+                            equipmentType = rowEquipmentType,
+                            gateStatus = gateStatusVal,
                             equipmentId = a.AssetId.ToString(),
-                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""
+                            checkInDate = a.ActualReturnDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? a.AssignedDate.ToString("yyyy-MM-dd HH:mm:ss")
                         });
-                        totalDetected++;
+                        if (isReturned) totalDetected++;
                         if (a.ActualReturnDate > lastCheckinTime)
                             lastCheckinTime = a.ActualReturnDate;
                     }
@@ -814,7 +847,7 @@ namespace API.Controllers
                         {
                             equipment = a.Asset?.Name ?? a.Asset?.AssetNumber ?? "Scanned Asset",
                             tagName = epc,
-                            equipmentType = "Handheld Reader",
+                            equipmentType = rowEquipmentType,
                             gateStatus = "MISSING",
                             equipmentId = a.AssetId.ToString(),
                             checkInDate = "-"
@@ -823,7 +856,7 @@ namespace API.Controllers
                     }
                 }
 
-                if (checkoutTable.Count == 0) continue;
+                if (checkoutTable.Count == 0 && checkinTable.Count == 0) continue;
 
                 resultTrucks.Add(new
                 {

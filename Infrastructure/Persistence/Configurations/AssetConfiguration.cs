@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using System;
@@ -35,6 +35,19 @@ namespace Infrastructure.Persistence.Configurations
 
             builder.Property(x => x.Status)
                 .HasConversion<int>();
+
+            builder.Property(x => x.DeliveryChallanNo)
+                .HasMaxLength(100);
+
+            builder.Property(x => x.InvoiceNumber)
+                .HasMaxLength(100);
+
+            builder.Property(x => x.InvoiceDate);
+
+            builder.Property(x => x.PoNumber)
+                .HasMaxLength(100);
+
+            builder.Property(x => x.Image);
 
             builder.HasOne(x => x.AssetCategory)
                 .WithMany(x => x.Assets)

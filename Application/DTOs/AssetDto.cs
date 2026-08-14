@@ -28,7 +28,12 @@ public record AssetDto(
     Guid? ZoneId,
     Guid? WarehouseId,
     Guid? LocationId,
-    string? LocationName
+    string? LocationName,
+    string? DeliveryChallanNo = null,
+    string? InvoiceNumber = null,
+    DateTime? InvoiceDate = null,
+    string? PoNumber = null,
+    string? Image = null
 );
 
 public record CreateAssetDto(
@@ -55,7 +60,12 @@ public record CreateAssetDto(
     Guid? SiteId,
     Guid? ZoneId,
     Guid? WarehouseId,
-    Guid? LocationId
+    Guid? LocationId,
+    string? DeliveryChallanNo = null,
+    string? InvoiceNumber = null,
+    DateTime? InvoiceDate = null,
+    string? PoNumber = null,
+    string? Image = null
 );
 
 public record UpdateAssetDto(
@@ -82,5 +92,10 @@ public record UpdateAssetDto(
     Guid? SiteId,
     Guid? ZoneId,
     Guid? WarehouseId,
-    Guid? LocationId
+    Guid? LocationId,
+    string? DeliveryChallanNo = null,
+    string? InvoiceNumber = null,
+    DateTime? InvoiceDate = null,
+    string? PoNumber = null,
+    string? Image = null
 );

@@ -39,29 +39,56 @@ namespace API.Controllers
             }
         }
 
+        protected Expression<Func<TEntity, bool>>? BuildCombinedFilter(Guid? querySiteId = null, Guid? queryWarehouseId = null)
+        {
+            var targetSiteId = querySiteId ?? CurrentUserSiteId;
+            var targetWhId = queryWarehouseId;
+
+            List<Expression> predicates = new();
+            var parameter = Expression.Parameter(typeof(TEntity), "e");
+
+            // 1. SiteId Filter
+            if (targetSiteId.HasValue)
+            {
+                var siteProp = typeof(TEntity).GetProperty("SiteId");
+                if (siteProp != null)
+                {
+                    Expression left = Expression.Property(parameter, siteProp);
+                    Expression right = siteProp.PropertyType == typeof(Guid?) 
+                        ? Expression.Constant(targetSiteId, typeof(Guid?)) 
+                        : Expression.Constant(targetSiteId.Value, typeof(Guid));
+                    predicates.Add(Expression.Equal(left, right));
+                }
+            }
+
+            // 2. WarehouseId Filter
+            if (targetWhId.HasValue)
+            {
+                var whProp = typeof(TEntity).GetProperty("WarehouseId");
+                if (whProp != null)
+                {
+                    Expression left = Expression.Property(parameter, whProp);
+                    Expression right = whProp.PropertyType == typeof(Guid?) 
+                        ? Expression.Constant(targetWhId, typeof(Guid?)) 
+                        : Expression.Constant(targetWhId.Value, typeof(Guid));
+                    predicates.Add(Expression.Equal(left, right));
+                }
+            }
+
+            if (!predicates.Any()) return null;
+
+            Expression combined = predicates[0];
+            for (int i = 1; i < predicates.Count; i++)
+            {
+                combined = Expression.AndAlso(combined, predicates[i]);
+            }
+
+            return Expression.Lambda<Func<TEntity, bool>>(combined, parameter);
+        }
+
         protected Expression<Func<TEntity, bool>>? GetSiteFilterExpression()
         {
-            var siteId = CurrentUserSiteId;
-            if (!siteId.HasValue) return null;
-
-            var property = typeof(TEntity).GetProperty("SiteId");
-            if (property == null) return null;
-
-            var parameter = Expression.Parameter(typeof(TEntity), "e");
-            Expression left = Expression.Property(parameter, property);
-            Expression right;
-
-            if (property.PropertyType == typeof(Guid?))
-            {
-                right = Expression.Constant(siteId, typeof(Guid?));
-            }
-            else
-            {
-                right = Expression.Constant(siteId.Value, typeof(Guid));
-            }
-
-            var body = Expression.Equal(left, right);
-            return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
+            return BuildCombinedFilter();
         }
 
         protected bool EnforceSiteRestriction(TEntity entity)
@@ -89,12 +116,14 @@ namespace API.Controllers
         [HttpGet]
         public virtual async Task<ActionResult<IEnumerable<TDto>>> GetAll(
             [FromQuery] int page = 1,
-            [FromQuery] int size = 10,
+            [FromQuery] int size = 200,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<TEntity>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<TDto>>(items));
@@ -248,6 +277,48 @@ namespace API.Controllers
     public class SitesController : CrudControllerBase<Site, SiteDto, CreateSiteDto>
     {
         public SitesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [AllowAnonymous]
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<SiteDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Site>();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<SiteDto>>(items));
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        public override async Task<ActionResult<SiteDto>> Create([FromBody] CreateSiteDto createDto, CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Site>();
+            var existing = await repo.GetAllAsync(cancellationToken);
+            var code = string.IsNullOrWhiteSpace(createDto.Code) ? "SITE-" + Guid.NewGuid().ToString().Substring(0, 4).ToUpper() : createDto.Code.Trim();
+
+            if (existing.Any(s => s.Code != null && s.Code.Equals(code, StringComparison.OrdinalIgnoreCase)))
+            {
+                code += "-" + Random.Shared.Next(100, 999);
+            }
+
+            var entity = new Site
+            {
+                Code = code,
+                Name = createDto.Name,
+                Address = createDto.Address
+            };
+
+            await repo.AddAsync(entity, cancellationToken);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return Ok(Mapper.Map<SiteDto>(entity));
+        }
     }
 
     [Authorize]
@@ -257,15 +328,18 @@ namespace API.Controllers
     {
         public WarehousesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
+        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<WarehouseDto>>> GetAll(
             [FromQuery] int page = 1,
-            [FromQuery] int size = 10,
+            [FromQuery] int size = 200,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Warehouse>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
@@ -276,6 +350,32 @@ namespace API.Controllers
                 x => x.Site);
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<WarehouseDto>>(items));
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        public override async Task<ActionResult<WarehouseDto>> Create([FromBody] CreateWarehouseDto createDto, CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Warehouse>();
+            var existing = await repo.GetAllAsync(cancellationToken);
+            var code = string.IsNullOrWhiteSpace(createDto.Code) ? "WH-" + Guid.NewGuid().ToString().Substring(0, 4).ToUpper() : createDto.Code.Trim();
+
+            if (existing.Any(w => w.Code != null && w.Code.Equals(code, StringComparison.OrdinalIgnoreCase)))
+            {
+                code += "-" + Random.Shared.Next(100, 999);
+            }
+
+            var entity = new Warehouse
+            {
+                Code = code,
+                Name = createDto.Name,
+                Address = createDto.Address,
+                SiteId = createDto.SiteId
+            };
+
+            await repo.AddAsync(entity, cancellationToken);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return Ok(Mapper.Map<WarehouseDto>(entity));
         }
 
         [HttpGet("{id:guid}")]
@@ -308,10 +408,12 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Zone>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
@@ -360,6 +462,8 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var query = _ctx.Locations
@@ -367,7 +471,7 @@ namespace API.Controllers
                     .ThenInclude(z => z.Warehouse)
                 .Where(l => !l.IsDeleted);
 
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             if (filter != null)
             {
                 query = query.Where(filter);
@@ -457,10 +561,13 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 200,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<GPSDevice>();
-            var (items, total) = await repo.GetPagedAsync(page, size, search, null, null, cancellationToken);
+            var filter = BuildCombinedFilter(siteId, warehouseId);
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<GPSDeviceDto>>(items));
         }
@@ -489,10 +596,12 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<AssetAssignment>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
@@ -511,7 +620,8 @@ namespace API.Controllers
                 m => m.MovementType != null &&
                      m.MovementType != "RFIDScan" &&
                      m.MovementType != "ScanInventory" &&
-                     m.MovementType != "HandheldInventory",
+                     m.MovementType != "HandheldInventory" &&
+                     m.MovementType != "HandheldScan",
                 cancellationToken,
                 m => m.Asset,
                 m => m.HandheldDevice,
@@ -520,10 +630,11 @@ namespace API.Controllers
 
             foreach (var m in movements.OrderByDescending(x => x.MovementDate))
             {
-                if (dtos.Any(d => d.Id == m.Id || (d.AssetId == m.AssetId && d.AssignedDate == m.MovementDate)))
+                if (dtos.Any(d => d.Id == m.Id || (d.AssetId == m.AssetId && Math.Abs((d.AssignedDate - m.MovementDate).TotalSeconds) < 60)))
                     continue;
 
-                bool isAntenna1Exit = m.Remarks != null && (m.Remarks.Contains("Antenna #1") || m.Remarks.Contains("Antenna 1") || m.Remarks.ToLower().Contains("exit"));
+                bool isFixedReaderScan = m.HandheldDevice == null && m.HandheldDeviceId == null;
+                bool isAntenna1Exit = isFixedReaderScan && m.Remarks != null && (m.Remarks.Contains("Antenna #1") || m.Remarks.Contains("Antenna 1") || m.Remarks.ToLower().Contains("exit"));
 
                 bool isExit = isAntenna1Exit ||
                               string.Equals(m.MovementType, "Checkout", StringComparison.OrdinalIgnoreCase) ||
@@ -535,11 +646,7 @@ namespace API.Controllers
                                   string.Equals(m.MovementType, "Return", StringComparison.OrdinalIgnoreCase) ||
                                   (m.MovementType != null && m.MovementType.ToUpper().Contains("CHECKIN")));
 
-                var deviceName = m.HandheldDevice?.Name;
-                if (string.IsNullOrEmpty(deviceName) || deviceName == "Handheld RFID Reader" || isExit)
-                {
-                    deviceName = "Warehouse Exit/Entry Door";
-                }
+                var deviceName = m.HandheldDevice?.Name ?? (isFixedReaderScan ? "Warehouse Exit/Entry Door" : "C72 Handheld Reader");
 
                 var remarks = m.Remarks ?? (isExit ? "Checked out via Fixed Reader Exit (Antenna 1)." : "Scanned automatically at RFID Reader.");
 
@@ -598,10 +705,12 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<AssetTransfer>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
@@ -653,10 +762,12 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<AssetMovement>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
@@ -718,10 +829,13 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 200,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Alert>();
-            var (items, total) = await repo.GetPagedAsync(page, size, search, null, null, cancellationToken);
+            var filter = BuildCombinedFilter(siteId, warehouseId);
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<AlertDto>>(items));
         }
@@ -748,10 +862,12 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 10,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<ScanSession>();
-            var filter = GetSiteFilterExpression();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,

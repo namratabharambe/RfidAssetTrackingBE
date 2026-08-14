@@ -49,7 +49,12 @@ namespace Application.Assets.Queries
                 asset.ZoneId,
                 asset.WarehouseId,
                 asset.LocationId,
-                asset.Location != null ? asset.Location.Name : null
+                asset.Location != null ? asset.Location.Name : null,
+                asset.DeliveryChallanNo,
+                asset.InvoiceNumber,
+                asset.InvoiceDate,
+                asset.PoNumber,
+                asset.Image
             ));
         }
     }

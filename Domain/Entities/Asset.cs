@@ -48,6 +48,11 @@ namespace Domain.Entities
         public string? CustodianEmail { get; set; }
         public string? Model { get; set; }
         public string? WarrantyProvider { get; set; }
+        public string? DeliveryChallanNo { get; set; }
+        public string? InvoiceNumber { get; set; }
+        public DateTime? InvoiceDate { get; set; }
+        public string? PoNumber { get; set; }
+        public string? Image { get; set; }
         
         public ICollection<AssetImage> AssetImages { get; set; } = new List<AssetImage>();
         public ICollection<RFIDTag> RFIDTags { get; set; } = new List<RFIDTag>();

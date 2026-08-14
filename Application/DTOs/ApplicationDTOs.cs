@@ -14,14 +14,18 @@ namespace Application.DTOs
         public string? SiteName { get; init; }
         public List<string> Roles { get; init; } = new();
         public List<string> Permissions { get; init; } = new();
+        public List<SiteDto> AllowedSites { get; init; } = new();
+        public List<WarehouseDto> AllowedWarehouses { get; init; } = new();
         public string Status => IsActive ? "Active" : "Inactive";
 
         public UserDto() { }
 
-        public UserDto(Guid id, string username, string email, bool isActive, Guid? siteId, string? siteName, List<string> roles, List<string> permissions)
+        public UserDto(Guid id, string username, string email, bool isActive, Guid? siteId, string? siteName, List<string> roles, List<string> permissions, List<SiteDto>? allowedSites = null, List<WarehouseDto>? allowedWarehouses = null)
         {
             Id = id; Username = username; Email = email; IsActive = isActive;
             SiteId = siteId; SiteName = siteName; Roles = roles; Permissions = permissions;
+            AllowedSites = allowedSites ?? new();
+            AllowedWarehouses = allowedWarehouses ?? new();
         }
     }
     public record CreateUserDto(string Username, string Email, string Password, List<Guid> RoleIds, Guid? SiteId = null);

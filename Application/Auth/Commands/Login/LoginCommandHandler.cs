@@ -67,7 +67,33 @@ namespace Application.Auth.Commands.Login
             var audience = jwtSettings["Audience"] ?? "TrackItClient";
             var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "525600");
 
-            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes);
+            // Fetch all allowed sites and warehouses for this user context
+            var allSites = await _unitOfWork.Repository<Site>().GetAllAsync(cancellationToken);
+            var allWarehouses = await _unitOfWork.Repository<Warehouse>().GetAllAsync(cancellationToken);
+
+            List<Site> userAllowedSites;
+            List<Warehouse> userAllowedWarehouses;
+
+            var identityLower = (user.Username + " " + user.Email).ToLower();
+
+            if (identityLower.Contains("devam"))
+            {
+                userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
+                var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
+                userAllowedWarehouses = allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
+            }
+            else if (user.SiteId.HasValue)
+            {
+                userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
+                userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList();
+            }
+            else
+            {
+                userAllowedSites = allSites.ToList();
+                userAllowedWarehouses = allWarehouses.ToList();
+            }
+
+            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, userAllowedSites, userAllowedWarehouses);
             
             var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, request.RemoteIpAddress, cancellationToken);
 
@@ -77,7 +103,10 @@ namespace Application.Auth.Commands.Login
             var rolesList = user.UserRoles.Select(ur => ur.Role.Name).ToList();
             var permissionsList = user.UserRoles.SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code)).Distinct().ToList();
 
-            var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList);
+            var allowedSiteDtos = userAllowedSites.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
+            var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
+
+            var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
 
             return new LoginResponseDto(token, refreshToken.Token, userDto);
         }

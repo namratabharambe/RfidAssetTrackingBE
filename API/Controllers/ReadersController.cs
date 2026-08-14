@@ -22,14 +22,17 @@ namespace API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int size = 200,
             [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Reader>();
+            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
                 search,
-                null,
+                filter,
                 null,
                 cancellationToken);
             Response.Headers.Add("X-Total-Count", total.ToString());

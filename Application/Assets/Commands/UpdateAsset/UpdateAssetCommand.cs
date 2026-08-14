@@ -31,6 +31,11 @@ namespace Application.Assets.Commands.UpdateAsset
         Guid? ManufacturerId,
         Guid? SiteId,
         Guid? ZoneId,
-        Guid? WarehouseId)
+        Guid? WarehouseId,
+        string? DeliveryChallanNo = null,
+        string? InvoiceNumber = null,
+        DateTime? InvoiceDate = null,
+        string? PoNumber = null,
+        string? Image = null)
         : IRequest;
 }
