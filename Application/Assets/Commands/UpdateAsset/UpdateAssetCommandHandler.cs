@@ -57,6 +57,11 @@ namespace Application.Assets.Commands.UpdateAsset
             asset.SiteId = request.SiteId;
             asset.ZoneId = request.ZoneId;
             asset.WarehouseId = request.WarehouseId;
+            asset.DeliveryChallanNo = request.DeliveryChallanNo;
+            asset.InvoiceNumber = request.InvoiceNumber;
+            asset.InvoiceDate = request.InvoiceDate;
+            asset.PoNumber = request.PoNumber;
+            asset.Image = request.Image;
 
             asset.UpdatedOn = DateTime.UtcNow;
 

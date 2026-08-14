@@ -286,19 +286,41 @@ namespace API.Controllers
                         var asset = await _db.Assets.FindAsync(tag.AssetId.Value);
                         if (asset != null)
                         {
-                            string movType = (isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2) ? "CheckOut" : ((isEntryOrExit == "ENTRY" || eventAntennaId == 3 || eventAntennaId == 4) ? "CheckIn" : "FixedReaderScan");
+                            bool isHandheldScan = handheldGuid != null || matchedReader == null;
+                            string movType = isHandheldScan ? "HandheldScan" : ((isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2) ? "CheckOut" : ((isEntryOrExit == "ENTRY" || eventAntennaId == 3 || eventAntennaId == 4) ? "CheckIn" : "FixedReaderScan"));
                             var movement = new AssetMovement
                             {
                                 Id = Guid.NewGuid(),
                                 AssetId = asset.Id,
-                                ReaderId = matchedReader?.Id ?? readerGuid,
+                                ReaderId = isHandheldScan ? null : (matchedReader?.Id ?? readerGuid),
+                                HandheldDeviceId = isHandheldScan ? (handheldGuid ?? Guid.Parse("019f3c62-cbca-75ec-a0a1-568c034f1200")) : null,
                                 MovementDate = scanTs,
                                 MovementType = movType,
-                                Remarks = $"Scanned at Fixed Reader ({matchedReader?.Name ?? resolvedReaderId}) Antenna #{eventAntennaId} [{movType}]."
+                                Remarks = isHandheldScan ? "Scanned via Handheld Reader." : $"Scanned at Fixed Reader ({matchedReader?.Name ?? resolvedReaderId}) Antenna #{eventAntennaId} [{movType}]."
                             };
                             _db.AssetMovements.Add(movement);
 
-                            if (isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2)
+                            if (isHandheldScan)
+                            {
+                                asset.Status = Domain.Enums.AssetStatus.Available;
+                                _db.Assets.Update(asset);
+
+                                var openAssignments = await _db.AssetAssignments
+                                    .Where(a => a.AssetId == asset.Id && !a.IsDeleted && (a.ActualReturnDate == null || a.Status == "Missing" || a.Status == "Active"))
+                                    .ToListAsync();
+
+                                if (openAssignments.Any())
+                                {
+                                    foreach (var openAss in openAssignments)
+                                    {
+                                        openAss.ActualReturnDate = scanTs;
+                                        openAss.Status = "Completed";
+                                        openAss.Notes = (openAss.Notes ?? "") + " | Scanned via Handheld Reader. Status: Found (COMPLETED).";
+                                        _db.AssetAssignments.Update(openAss);
+                                    }
+                                }
+                            }
+                            else if (isEntryOrExit == "EXIT" || eventAntennaId == 1 || eventAntennaId == 2)
                             {
                                 asset.Status = Domain.Enums.AssetStatus.Assigned;
                                 _db.Assets.Update(asset);
@@ -311,13 +333,9 @@ namespace API.Controllers
                                     var defaultUser = await _db.Users.FirstOrDefaultAsync();
                                     string custodian = !string.IsNullOrWhiteSpace(batch.OperatorName) 
                                         ? batch.OperatorName 
-                                        : (handheldGuid != null) 
-                                            ? "Handheld Reader" 
-                                            : "EXIT";
+                                        : "EXIT";
 
-                                    string purposeType = (handheldGuid != null) 
-                                        ? "Handheld Reader" 
-                                        : "READER";
+                                    string purposeType = "READER";
 
                                     var newAssignment = new AssetAssignment
                                     {

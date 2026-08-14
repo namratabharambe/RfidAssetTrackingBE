@@ -47,10 +47,11 @@ namespace API.Controllers
         [AllowAnonymous]
         public async Task<ActionResult> HandheldLogin([FromBody] CompatibilityLoginRequest request, CancellationToken cancellationToken)
         {
+            // Android sends both 'username' and 'email' fields — use whichever is populated
+            var identity = request.Username ?? request.Email ?? "";
             try
             {
-                // Try with email as username (since LoginDto.Username can be email)
-                var loginDto = new LoginDto(request.Email, request.Password);
+                var loginDto = new LoginDto(identity, request.Password);
                 var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
                 var result = await _mediator.Send(new LoginCommand(loginDto, ipAddress), cancellationToken);
 
@@ -72,49 +73,20 @@ namespace API.Controllers
                     }
                 });
             }
-            catch (System.UnauthorizedAccessException)
+            catch (System.UnauthorizedAccessException ex)
             {
-                // Retry: maybe they logged in using username instead of email
-                try
-                {
-                    var loginDto2 = new LoginDto(request.Email, request.Password);
-                    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-                    var result2 = await _mediator.Send(new LoginCommand(loginDto2, ipAddress), cancellationToken);
-                    var roleId2 = result2.User.Roles.FirstOrDefault() ?? "operator";
-                    return Ok(new
-                    {
-                        message = "Login successful",
-                        token = result2.Token,
-                        user = new
-                        {
-                            userId = result2.User.Id.ToString(),
-                            userName = result2.User.Username,
-                            email = result2.User.Email,
-                            siteId = result2.User.SiteId?.ToString() ?? Guid.Empty.ToString(),
-                            roleId = roleId2,
-                            roleName = roleId2,
-                            clientType = "AssetTracking"
-                        }
-                    });
-                }
-                catch (System.UnauthorizedAccessException ex2)
-                {
-                    return Unauthorized(new { message = ex2.Message });
-                }
-                catch (Exception ex2)
-                {
-                    return StatusCode(500, new { message = $"Database or Server Login Error: {ex2.Message}", detail = ex2.InnerException?.Message });
-                }
+                return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = $"Database or Server Login Error: {ex.Message}", detail = ex.InnerException?.Message });
+                return StatusCode(500, new { message = $"Login Error: {ex.Message}", detail = ex.InnerException?.Message });
             }
         }
 
         public class CompatibilityLoginRequest
         {
-            public string Email { get; set; } = null!;
+            public string? Username { get; set; }  // Android sends 'username'
+            public string? Email { get; set; }     // Also accept 'email'
             public string Password { get; set; } = null!;
         }
 

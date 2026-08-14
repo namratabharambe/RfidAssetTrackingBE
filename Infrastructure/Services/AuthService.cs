@@ -30,7 +30,7 @@ namespace Infrastructure.Services
             return Convert.ToBase64String(bytes);
         }
 
-        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes)
+        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes, IEnumerable<Site>? allowedSites = null, IEnumerable<Warehouse>? allowedWarehouses = null)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.ASCII.GetBytes(secretKey);
@@ -42,17 +42,58 @@ namespace Infrastructure.Services
                 new Claim(ClaimTypes.Email, user.Email)
             };
 
+            // 1. Site Access Claims
+            var sitesList = allowedSites?.ToList() ?? new List<Site>();
+            if (user.Site != null && !sitesList.Any(s => s.Id == user.Site.Id))
+            {
+                sitesList.Add(user.Site);
+            }
+
             if (user.SiteId.HasValue)
             {
                 claims.Add(new Claim("siteId", user.SiteId.Value.ToString()));
             }
 
-            foreach (var userRole in user.UserRoles)
+            if (sitesList.Any())
             {
-                claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
-                foreach (var rolePermission in userRole.Role.RolePermissions)
+                foreach (var site in sitesList)
                 {
-                    claims.Add(new Claim("permission", rolePermission.Permission.Code));
+                    claims.Add(new Claim("sites", site.Id.ToString()));
+                }
+            }
+
+            // 2. Role Access Claims
+            var roleNames = new List<string>();
+            if (user.UserRoles != null && user.UserRoles.Any())
+            {
+                foreach (var userRole in user.UserRoles)
+                {
+                    if (userRole.Role != null && !string.IsNullOrEmpty(userRole.Role.Name))
+                    {
+                        roleNames.Add(userRole.Role.Name);
+                        claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
+                    }
+                }
+            }
+
+            if (!roleNames.Any())
+            {
+                var defaultRole = user.SiteId.HasValue ? "Site Admin" : "Super Admin";
+                claims.Add(new Claim(ClaimTypes.Role, defaultRole));
+                claims.Add(new Claim("roles", defaultRole));
+            }
+            else
+            {
+                claims.Add(new Claim("roles", string.Join(",", roleNames)));
+            }
+
+            // 3. Warehouse Access Claims
+            var warehousesList = allowedWarehouses?.ToList() ?? new List<Warehouse>();
+            if (warehousesList.Any())
+            {
+                foreach (var wh in warehousesList)
+                {
+                    claims.Add(new Claim("warehouses", wh.Id.ToString()));
                 }
             }
 
