@@ -34,7 +34,10 @@ namespace API.Controllers
         {
             get
             {
-                var claim = User.FindFirst("siteId")?.Value;
+                var claim = User.Claims
+                    .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out _));
                 return Guid.TryParse(claim, out var guid) ? guid : null;
             }
         }
