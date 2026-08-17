@@ -114,7 +114,8 @@ namespace Application.Auth.Commands.Login
             var allowedSiteDtos = userAllowedSites.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
             var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
 
-            var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
+            var activeSiteName = userAllowedSites.FirstOrDefault(s => s.Id == user.SiteId)?.Name ?? user.Site?.Name;
+            var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, activeSiteName, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
 
             return new LoginResponseDto(token, refreshToken.Token, userDto);
         }
