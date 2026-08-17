@@ -32,6 +32,7 @@ namespace Application.DTOs
     public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid> RoleIds, Guid? SiteId = null);
     public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
+    public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null);
     public record RefreshTokenDto(string Token, string RefreshToken);
     public record ForgotPasswordDto(string Email);
     public record ResetPasswordDto(string Token, string NewPassword);
