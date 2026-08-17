@@ -52,9 +52,9 @@ namespace Infrastructure.Services
             if (user.SiteId.HasValue)
             {
                 claims.Add(new Claim("siteId", user.SiteId.Value.ToString()));
+                claims.Add(new Claim("sites", user.SiteId.Value.ToString()));
             }
-
-            if (sitesList.Any())
+            else if (sitesList.Any())
             {
                 foreach (var site in sitesList)
                 {
@@ -89,6 +89,10 @@ namespace Infrastructure.Services
 
             // 3. Warehouse Access Claims
             var warehousesList = allowedWarehouses?.ToList() ?? new List<Warehouse>();
+            if (user.SiteId.HasValue)
+            {
+                warehousesList = warehousesList.Where(w => w.SiteId == user.SiteId.Value).ToList();
+            }
             if (warehousesList.Any())
             {
                 foreach (var wh in warehousesList)
