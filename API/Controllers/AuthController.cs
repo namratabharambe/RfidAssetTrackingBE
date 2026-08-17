@@ -166,6 +166,7 @@ namespace API.Controllers
                 Guid? targetWhId = request.WarehouseId;
 
                 user.SiteId = targetSiteId;
+                user.Site = null;
 
                 List<Site> userAllowedSites;
                 List<Warehouse> userAllowedWarehouses;
