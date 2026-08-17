@@ -10,6 +10,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Application.Interfaces;
+using Domain.Entities;
+using Microsoft.Extensions.Configuration;
+
 namespace API.Controllers
 {
     [ApiController]
@@ -17,10 +21,16 @@ namespace API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IMediator _mediator;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IAuthService _authService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(IMediator mediator)
+        public AuthController(IMediator mediator, IUnitOfWork unitOfWork, IAuthService authService, IConfiguration configuration)
         {
             _mediator = mediator;
+            _unitOfWork = unitOfWork;
+            _authService = authService;
+            _configuration = configuration;
         }
 
         [HttpPost("login")]
@@ -113,6 +123,99 @@ namespace API.Controllers
             var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
             await _mediator.Send(new LogoutCommand(tokenDto, ipAddress), cancellationToken);
             return Ok(new { Message = "Logged out successfully." });
+        }
+
+        [HttpPost("switch-context")]
+        [Authorize]
+        public async Task<ActionResult<LoginResponseDto>> SwitchContext([FromBody] SwitchContextDto request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!Guid.TryParse(userIdStr, out var userId))
+                {
+                    return Unauthorized(new { message = "Invalid user claims token." });
+                }
+
+                var userRepo = _unitOfWork.Repository<User>();
+                var users = await userRepo.GetFilteredAsync(u => u.Id == userId, cancellationToken, u => u.UserRoles, u => u.Site);
+                var user = users.FirstOrDefault();
+                if (user == null || !user.IsActive)
+                {
+                    return NotFound(new { message = "User not found or inactive." });
+                }
+
+                foreach (var ur in user.UserRoles)
+                {
+                    var role = await _unitOfWork.Repository<Role>().GetByIdAsync(ur.RoleId, cancellationToken, r => r.RolePermissions);
+                    if (role != null)
+                    {
+                        ur.Role = role;
+                        foreach (var rp in role.RolePermissions)
+                        {
+                            var permission = await _unitOfWork.Repository<Permission>().GetByIdAsync(rp.PermissionId, cancellationToken);
+                            if (permission != null) rp.Permission = permission;
+                        }
+                    }
+                }
+
+                var allSites = await _unitOfWork.Repository<Site>().GetAllAsync(cancellationToken);
+                var allWarehouses = await _unitOfWork.Repository<Warehouse>().GetAllAsync(cancellationToken);
+
+                Guid? targetSiteId = request.SiteId.HasValue ? request.SiteId.Value : user.SiteId;
+                Guid? targetWhId = request.WarehouseId;
+
+                user.SiteId = targetSiteId;
+
+                var userAllowedSites = new List<Site>();
+                if (targetSiteId.HasValue)
+                {
+                    var matchedSite = allSites.FirstOrDefault(s => s.Id == targetSiteId.Value);
+                    if (matchedSite != null) userAllowedSites.Add(matchedSite);
+                }
+                else
+                {
+                    userAllowedSites = allSites.ToList();
+                }
+
+                var userAllowedWarehouses = new List<Warehouse>();
+                if (targetWhId.HasValue)
+                {
+                    var matchedWh = allWarehouses.FirstOrDefault(w => w.Id == targetWhId.Value);
+                    if (matchedWh != null) userAllowedWarehouses.Add(matchedWh);
+                }
+                else if (targetSiteId.HasValue)
+                {
+                    userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == targetSiteId.Value).ToList();
+                }
+                else
+                {
+                    userAllowedWarehouses = allWarehouses.ToList();
+                }
+
+                var jwtSettings = _configuration.GetSection("JwtSettings");
+                var secretKey = jwtSettings["Secret"] ?? "EnterpriseRFIDAssetTrackingGPSERPSecretKeySecretKey";
+                var issuer = jwtSettings["Issuer"] ?? "TrackItAPI";
+                var audience = jwtSettings["Audience"] ?? "TrackItClient";
+                var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "525600");
+
+                var newToken = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, userAllowedSites, userAllowedWarehouses);
+                var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1", cancellationToken);
+
+                var rolesList = user.UserRoles.Select(ur => ur.Role?.Name ?? "User").Distinct().ToList();
+                var permissionsList = user.UserRoles.SelectMany(ur => ur.Role?.RolePermissions?.Select(rp => rp.Permission?.Code ?? "") ?? new List<string>()).Distinct().Where(p => !string.IsNullOrEmpty(p)).ToList();
+
+                var allowedSiteDtos = userAllowedSites.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
+                var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
+
+                var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
+
+                return Ok(new LoginResponseDto(newToken, refreshToken.Token, userDto));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Error switching context: {ex.Message}" });
+            }
         }
     }
 }
