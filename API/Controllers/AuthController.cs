@@ -208,7 +208,8 @@ namespace API.Controllers
                 var allowedSiteDtos = singleSiteContextList.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
                 var allowedWarehouseDtos = singleWhContextList.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
 
-                var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
+                var activeSiteName = singleSiteContextList.FirstOrDefault(s => s.Id == targetSiteId)?.Name ?? user.Site?.Name;
+                var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, activeSiteName, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
 
                 return Ok(new LoginResponseDto(newToken, refreshToken.Token, userDto));
             }
