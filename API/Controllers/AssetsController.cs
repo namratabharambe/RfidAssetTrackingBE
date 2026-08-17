@@ -35,42 +35,36 @@ namespace API.Controllers
                                       || HttpContext.User.HasClaim(c => c.Type == "allowed_site_ids" && c.Value == "ALL")
                                       || HttpContext.User.HasClaim(c => c.Type == "sites" && c.Value == "GLOBAL_ALL_SITES");
 
-                // Extract all site IDs assigned to user in token claims ('sites', 'siteId', 'allowed_site_ids')
-                var tokenSiteGuids = HttpContext.User.Claims
-                    .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                // Extract site ID assigned to user in token claim ('siteId' or 'site_id')
+                var tokenSiteGuid = HttpContext.User.Claims
+                    .Where(c => c.Type == "siteId" || c.Type == "site_id")
                     .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                    .Where(g => g.HasValue)
-                    .Select(g => g!.Value)
-                    .Distinct()
-                    .ToList();
+                    .FirstOrDefault(g => g.HasValue);
 
-                // Extract all warehouse IDs assigned to user in token claims ('warehouses', 'warehouseId', 'allowed_warehouse_ids')
-                var tokenWhGuids = HttpContext.User.Claims
-                    .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                // Extract warehouse ID assigned to user in token claim ('warehouseId' or 'warehouse_id')
+                var tokenWhGuid = HttpContext.User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouse_id")
                     .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                    .Where(g => g.HasValue)
-                    .Select(g => g!.Value)
-                    .Distinct()
-                    .ToList();
+                    .FirstOrDefault(g => g.HasValue);
 
-                // Strict Site Scoping: Direct query parameter or token site claims
+                // Strict Site Scoping: Direct query parameter or token siteId claim
                 if (siteId.HasValue)
                 {
                     assets = assets.Where(a => a.SiteId == siteId.Value);
                 }
-                else if (!isGlobalSuperAdmin && tokenSiteGuids.Any())
+                else if (tokenSiteGuid.HasValue)
                 {
-                    assets = assets.Where(a => a.SiteId.HasValue && tokenSiteGuids.Contains(a.SiteId.Value));
+                    assets = assets.Where(a => a.SiteId.HasValue && a.SiteId.Value == tokenSiteGuid.Value);
                 }
 
-                // Strict Warehouse Scoping: Direct query parameter or token warehouse claims
+                // Strict Warehouse Scoping: Direct query parameter or token warehouseId claim
                 if (warehouseId.HasValue)
                 {
                     assets = assets.Where(a => a.WarehouseId == warehouseId.Value || a.WarehouseId == null);
                 }
-                else if (!isGlobalSuperAdmin && tokenWhGuids.Any())
+                else if (tokenWhGuid.HasValue)
                 {
-                    assets = assets.Where(a => a.WarehouseId == null || (a.WarehouseId.HasValue && tokenWhGuids.Contains(a.WarehouseId.Value)));
+                    assets = assets.Where(a => a.WarehouseId == null || (a.WarehouseId.HasValue && a.WarehouseId.Value == tokenWhGuid.Value));
                 }
             }
             else
