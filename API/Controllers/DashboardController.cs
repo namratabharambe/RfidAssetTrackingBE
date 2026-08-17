@@ -27,17 +27,13 @@ namespace API.Controllers
 
             if (HttpContext.User.Identity?.IsAuthenticated == true)
             {
-                var isGlobalSuperAdmin = HttpContext.User.IsInRole("Super Admin") 
-                                      || HttpContext.User.HasClaim(c => c.Type == "allowed_site_ids" && c.Value == "ALL")
-                                      || HttpContext.User.HasClaim(c => c.Type == "sites" && c.Value == "GLOBAL_ALL_SITES");
-
-                if (!targetSiteId.HasValue && !isGlobalSuperAdmin)
+                if (!targetSiteId.HasValue)
                 {
                     var siteClaim = HttpContext.User.FindFirst("siteId")?.Value ?? HttpContext.User.FindFirst("site_id")?.Value;
                     if (Guid.TryParse(siteClaim, out var g)) targetSiteId = g;
                 }
 
-                if (!targetWhId.HasValue && !isGlobalSuperAdmin)
+                if (!targetWhId.HasValue)
                 {
                     var whClaim = HttpContext.User.FindFirst("warehouseId")?.Value ?? HttpContext.User.FindFirst("warehouse_id")?.Value;
                     if (Guid.TryParse(whClaim, out var g)) targetWhId = g;
