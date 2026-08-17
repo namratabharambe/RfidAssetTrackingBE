@@ -205,8 +205,8 @@ namespace API.Controllers
                 var rolesList = user.UserRoles.Select(ur => ur.Role?.Name ?? "User").Distinct().ToList();
                 var permissionsList = user.UserRoles.SelectMany(ur => ur.Role?.RolePermissions?.Select(rp => rp.Permission?.Code ?? "") ?? new List<string>()).Distinct().Where(p => !string.IsNullOrEmpty(p)).ToList();
 
-                var allowedSiteDtos = userAllowedSites.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
-                var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
+                var allowedSiteDtos = singleSiteContextList.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
+                var allowedWarehouseDtos = singleWhContextList.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
 
                 var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, user.Site?.Name, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
 
