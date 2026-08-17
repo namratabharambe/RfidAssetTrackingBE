@@ -29,13 +29,19 @@ namespace API.Controllers
             {
                 if (!targetSiteId.HasValue)
                 {
-                    var siteClaim = HttpContext.User.FindFirst("siteId")?.Value ?? HttpContext.User.FindFirst("site_id")?.Value;
+                    var siteClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out _));
                     if (Guid.TryParse(siteClaim, out var g)) targetSiteId = g;
                 }
 
                 if (!targetWhId.HasValue)
                 {
-                    var whClaim = HttpContext.User.FindFirst("warehouseId")?.Value ?? HttpContext.User.FindFirst("warehouse_id")?.Value;
+                    var whClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out _));
                     if (Guid.TryParse(whClaim, out var g)) targetWhId = g;
                 }
             }
