@@ -51,14 +51,14 @@ namespace API.Controllers
                 var targetSite = siteId ?? tokenSiteGuid;
                 if (targetSite.HasValue)
                 {
-                    assets = assets.Where(a => a.SiteId == targetSite.Value || a.SiteId == null);
+                    assets = assets.Where(a => a.SiteId == targetSite.Value);
                 }
 
                 // Strict Warehouse Scoping: Direct query parameter or token warehouseId claim
                 var targetWh = warehouseId ?? tokenWhGuid;
                 if (targetWh.HasValue)
                 {
-                    assets = assets.Where(a => a.WarehouseId == null || a.WarehouseId == targetWh.Value);
+                    assets = assets.Where(a => a.WarehouseId == targetWh.Value);
                 }
             }
             else
