@@ -21,13 +21,23 @@ namespace Infrastructure.Services
             _context = context;
         }
 
-        public async Task<DashboardDto> GetDashboardDataAsync(CancellationToken cancellationToken = default)
+        public async Task<DashboardDto> GetDashboardDataAsync(Guid? siteId = null, Guid? warehouseId = null, CancellationToken cancellationToken = default)
         {
-            var assets = await _context.Assets
+            var assetsQuery = _context.Assets
                 .Include(a => a.Location).ThenInclude(l => l.Zone).ThenInclude(z => z.Warehouse)
                 .Include(a => a.Site)
-                .Where(x => !x.IsDeleted)
-                .ToListAsync(cancellationToken);
+                .Where(x => !x.IsDeleted);
+
+            if (siteId.HasValue)
+            {
+                assetsQuery = assetsQuery.Where(x => x.SiteId == siteId.Value);
+            }
+            if (warehouseId.HasValue)
+            {
+                assetsQuery = assetsQuery.Where(x => x.WarehouseId == warehouseId.Value || x.WarehouseId == null);
+            }
+
+            var assets = await assetsQuery.ToListAsync(cancellationToken);
 
             var total = assets.Count;
             var available = assets.Count(x => x.Status == AssetStatus.Available);
@@ -36,10 +46,12 @@ namespace Infrastructure.Services
             var retired = assets.Count(x => x.Status == AssetStatus.Retired);
 
             // ── Site Stats: breakdown per Site ──────────────────────────────────
-            var sites = await _context.Sites
-                .Where(x => !x.IsDeleted)
-                .Include(x => x.Warehouses)
-                .ToListAsync(cancellationToken);
+            IQueryable<Site> sitesQuery = _context.Sites.Where(x => !x.IsDeleted);
+            if (siteId.HasValue)
+            {
+                sitesQuery = sitesQuery.Where(x => x.Id == siteId.Value);
+            }
+            var sites = await sitesQuery.Include(x => x.Warehouses).ToListAsync(cancellationToken);
 
             var today = DateTime.UtcNow.Date;
             var siteStats = new List<SiteStatDto>();
@@ -95,11 +107,12 @@ namespace Infrastructure.Services
             }
 
             // ── Reader Statuses ──────────────────────────────────────────────────
-            var readers = await _context.Readers
-                .Where(x => !x.IsDeleted)
-                .Include(r => r.Site)
-                .Take(10)
-                .ToListAsync(cancellationToken);
+            IQueryable<Reader> readersQuery = _context.Readers.Where(x => !x.IsDeleted);
+            if (siteId.HasValue)
+            {
+                readersQuery = readersQuery.Where(r => r.SiteId == siteId.Value);
+            }
+            var readers = await readersQuery.Include(r => r.Site).Take(10).ToListAsync(cancellationToken);
 
             var readerStatuses = readers.Select(r => new ReaderStatusDto(
                 r.Name,
@@ -108,11 +121,12 @@ namespace Infrastructure.Services
             )).ToList();
 
             // ── GPS Device Statuses ──────────────────────────────────────────────
-            var gpsDevices = await _context.GPSDevices
-                .Where(x => !x.IsDeleted)
-                .Include(g => g.Asset)
-                .Take(10)
-                .ToListAsync(cancellationToken);
+            IQueryable<GPSDevice> gpsDevicesQuery = _context.GPSDevices.Where(x => !x.IsDeleted);
+            if (siteId.HasValue)
+            {
+                gpsDevicesQuery = gpsDevicesQuery.Where(g => g.Asset != null && g.Asset.SiteId == siteId.Value);
+            }
+            var gpsDevices = await gpsDevicesQuery.Include(g => g.Asset).Take(10).ToListAsync(cancellationToken);
 
             var gpsStatuses = gpsDevices.Select(g => new GPSDeviceStatusDto(
                 g.Imei,

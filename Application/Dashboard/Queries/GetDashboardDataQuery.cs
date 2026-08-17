@@ -3,5 +3,5 @@ using MediatR;
 
 namespace Application.Dashboard.Queries
 {
-    public record GetDashboardDataQuery : IRequest<DashboardDto>;
+    public record GetDashboardDataQuery(Guid? SiteId = null, Guid? WarehouseId = null) : IRequest<DashboardDto>;
 }
