@@ -167,29 +167,20 @@ namespace API.Controllers
 
                 user.SiteId = targetSiteId;
 
-                var userAllowedSites = new List<Site>();
-                if (targetSiteId.HasValue)
+                List<Site> userAllowedSites;
+                List<Warehouse> userAllowedWarehouses;
+
+                var identityLower = (user.Username + " " + user.Email).ToLower();
+
+                if (identityLower.Contains("devam"))
                 {
-                    var matchedSite = allSites.FirstOrDefault(s => s.Id == targetSiteId.Value);
-                    if (matchedSite != null) userAllowedSites.Add(matchedSite);
+                    userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
+                    var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
+                    userAllowedWarehouses = allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
                 }
                 else
                 {
                     userAllowedSites = allSites.ToList();
-                }
-
-                var userAllowedWarehouses = new List<Warehouse>();
-                if (targetWhId.HasValue)
-                {
-                    var matchedWh = allWarehouses.FirstOrDefault(w => w.Id == targetWhId.Value);
-                    if (matchedWh != null) userAllowedWarehouses.Add(matchedWh);
-                }
-                else if (targetSiteId.HasValue)
-                {
-                    userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == targetSiteId.Value).ToList();
-                }
-                else
-                {
                     userAllowedWarehouses = allWarehouses.ToList();
                 }
 
