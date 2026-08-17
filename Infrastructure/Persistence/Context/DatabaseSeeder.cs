@@ -238,6 +238,15 @@ namespace Infrastructure.Persistence.Context
                     new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-003", Name = "Project Site Container Store #05", Status = AssetStatus.Available, AssetCategoryId = ReturnableContainerId, SiteId = devamProjectId, Group = "Containers" }
                 );
                 await context.SaveChangesAsync();
+            // Ensure all Devam Alpha Site assets are assigned to Devam Warehouse
+            var alphaAssets = await context.Assets.Where(a => a.SiteId == devamAlphaId && a.WarehouseId == null).ToListAsync();
+            if (alphaAssets.Any())
+            {
+                foreach (var a in alphaAssets)
+                {
+                    a.WarehouseId = devamWhId;
+                }
+                await context.SaveChangesAsync();
             }
 
             // 5. Seed default Handheld Device
