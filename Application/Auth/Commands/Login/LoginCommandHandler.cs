@@ -93,7 +93,20 @@ namespace Application.Auth.Commands.Login
                 userAllowedWarehouses = allWarehouses.ToList();
             }
 
-            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, userAllowedSites, userAllowedWarehouses);
+            if (!user.SiteId.HasValue && userAllowedSites.Any())
+            {
+                user.SiteId = userAllowedSites.First().Id;
+            }
+
+            var singleSiteContextList = user.SiteId.HasValue
+                ? userAllowedSites.Where(s => s.Id == user.SiteId.Value).ToList()
+                : userAllowedSites;
+
+            var singleWhContextList = user.SiteId.HasValue
+                ? userAllowedWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList()
+                : userAllowedWarehouses;
+
+            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, singleSiteContextList, singleWhContextList);
             
             var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, request.RemoteIpAddress, cancellationToken);
 
