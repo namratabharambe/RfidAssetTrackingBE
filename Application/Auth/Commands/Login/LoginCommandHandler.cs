@@ -82,11 +82,6 @@ namespace Application.Auth.Commands.Login
                 var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
                 userAllowedWarehouses = allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
             }
-            else if (user.SiteId.HasValue)
-            {
-                userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
-                userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList();
-            }
             else
             {
                 userAllowedSites = allSites.ToList();
