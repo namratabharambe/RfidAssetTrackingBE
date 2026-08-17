@@ -47,18 +47,17 @@ namespace API.Controllers
                     .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
                     .FirstOrDefault(g => g.HasValue);
 
-                // Strict Site Scoping: Direct query parameter or token siteId claim
+                // Strict Site/Warehouse Scoping: Direct query parameter or token claim
                 var targetSite = siteId ?? tokenSiteGuid;
-                if (targetSite.HasValue)
-                {
-                    assets = assets.Where(a => a.SiteId == targetSite.Value);
-                }
-
-                // Strict Warehouse Scoping: Direct query parameter or token warehouseId claim
                 var targetWh = warehouseId ?? tokenWhGuid;
+
                 if (targetWh.HasValue)
                 {
-                    assets = assets.Where(a => a.WarehouseId == targetWh.Value);
+                    assets = assets.Where(a => a.WarehouseId == targetWh.Value || (targetSite.HasValue && a.SiteId == targetSite.Value && a.WarehouseId == null));
+                }
+                else if (targetSite.HasValue)
+                {
+                    assets = assets.Where(a => a.SiteId == targetSite.Value);
                 }
             }
             else
