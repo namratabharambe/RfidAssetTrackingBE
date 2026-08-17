@@ -195,9 +195,9 @@ namespace API.Controllers
                     ? userAllowedSites.Where(s => s.Id == targetSiteId.Value).ToList()
                     : userAllowedSites;
 
-                var singleWhContextList = targetSiteId.HasValue
-                    ? userAllowedWarehouses.Where(w => w.SiteId == targetSiteId.Value).ToList()
-                    : userAllowedWarehouses;
+                var singleWhContextList = targetWhId.HasValue
+                    ? userAllowedWarehouses.Where(w => w.Id == targetWhId.Value).ToList()
+                    : new List<Warehouse>();
 
                 var newToken = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, singleSiteContextList, singleWhContextList);
                 var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1", cancellationToken);
