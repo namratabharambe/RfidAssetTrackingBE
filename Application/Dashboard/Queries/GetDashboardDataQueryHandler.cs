@@ -17,7 +17,7 @@ namespace Application.Dashboard.Queries
 
         public async Task<DashboardDto> Handle(GetDashboardDataQuery request, CancellationToken cancellationToken)
         {
-            return await _dashboardService.GetDashboardDataAsync(cancellationToken);
+            return await _dashboardService.GetDashboardDataAsync(request.SiteId, request.WarehouseId, cancellationToken);
         }
     }
 }
