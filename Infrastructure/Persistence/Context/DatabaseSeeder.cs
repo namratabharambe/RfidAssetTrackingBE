@@ -240,8 +240,8 @@ namespace Infrastructure.Persistence.Context
                 await context.SaveChangesAsync();
             }
 
-            // Ensure all Devam Alpha Site assets are assigned to Devam Warehouse
-            var alphaAssets = await context.Assets.Where(a => a.SiteId == devamAlphaId && a.WarehouseId == null).ToListAsync();
+            // Ensure all Devam Alpha Site assets are assigned to Devam Central Store Main Warehouse
+            var alphaAssets = await context.Assets.Where(a => a.SiteId == devamAlphaId && (a.WarehouseId == null || a.WarehouseId != devamWhId)).ToListAsync();
             if (alphaAssets.Any())
             {
                 foreach (var a in alphaAssets)
