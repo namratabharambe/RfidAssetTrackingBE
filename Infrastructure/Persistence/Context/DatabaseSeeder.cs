@@ -197,6 +197,49 @@ namespace Infrastructure.Persistence.Context
                 await context.SaveChangesAsync();
             }
 
+            // Ensure Devam sites exist in DB
+            var devamAlphaId = Guid.Parse("019fef88-a629-79e7-af95-546fdb11b7a3");
+            var devamProjectId = Guid.Parse("019fef93-7e50-7b70-88e9-6a451cb52b8b");
+            var devamWhId = Guid.Parse("019fef93-8ac8-797e-986e-3fcb5e1295b2");
+
+            if (!await context.Sites.AnyAsync(s => s.Id == devamAlphaId))
+            {
+                await context.Sites.AddAsync(new Site { Id = devamAlphaId, Code = "DEVAM-ALPHA", Name = "Devam Central Store Site Alpha", Address = "Devam Alpha Complex, Pune" });
+            }
+            if (!await context.Sites.AnyAsync(s => s.Id == devamProjectId))
+            {
+                await context.Sites.AddAsync(new Site { Id = devamProjectId, Code = "DEVAM-PROJ", Name = "Devam Central Store Project Site", Address = "Devam Project Site, Mumbai" });
+            }
+            await context.SaveChangesAsync();
+
+            if (!await context.Warehouses.AnyAsync(w => w.Id == devamWhId))
+            {
+                await context.Warehouses.AddAsync(new Warehouse { Id = devamWhId, Code = "DEVAM-WH-1", Name = "Devam Central Store Main Warehouse", SiteId = devamAlphaId, Address = "Devam Main Storage" });
+                await context.SaveChangesAsync();
+            }
+
+            // Seed Assets for Devam Sites if Assets table has no assets for Alpha / Project
+            if (!await context.Assets.AnyAsync(a => a.SiteId == devamAlphaId))
+            {
+                await context.Assets.AddRangeAsync(
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-001", Name = "High Performance Server Rack - Alpha", Status = AssetStatus.Available, AssetCategoryId = ITAssetsId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "IT Infrastructure" },
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-002", Name = "Forklift Heavy Lifter 5T - Alpha", Status = AssetStatus.Assigned, AssetCategoryId = VehiclesId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Material Handling" },
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-003", Name = "Industrial Generator 500kVA", Status = AssetStatus.Available, AssetCategoryId = PowerEquipmentId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Power Equipment" },
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-004", Name = "Returnable Transit Pallet Bin #104", Status = AssetStatus.UnderMaintenance, AssetCategoryId = ReturnableContainerId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Returnables" }
+                );
+                await context.SaveChangesAsync();
+            }
+
+            if (!await context.Assets.AnyAsync(a => a.SiteId == devamProjectId))
+            {
+                await context.Assets.AddRangeAsync(
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-001", Name = "Mobile Crane 20T - Project Site", Status = AssetStatus.Assigned, AssetCategoryId = VehiclesId, SiteId = devamProjectId, Group = "Heavy Equipment" },
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-002", Name = "Site Field Workstation Laptop #02", Status = AssetStatus.Available, AssetCategoryId = ITAssetsId, SiteId = devamProjectId, Group = "IT Equipment" },
+                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-003", Name = "Project Site Container Store #05", Status = AssetStatus.Available, AssetCategoryId = ReturnableContainerId, SiteId = devamProjectId, Group = "Containers" }
+                );
+                await context.SaveChangesAsync();
+            }
+
             // 5. Seed default Handheld Device
             if (!await context.HandheldDevices.AnyAsync())
             {
