@@ -53,7 +53,7 @@ namespace API.Controllers
 
                 if (targetWh.HasValue)
                 {
-                    assets = assets.Where(a => a.WarehouseId == targetWh.Value || (targetSite.HasValue && a.SiteId == targetSite.Value && a.WarehouseId == null));
+                    assets = assets.Where(a => a.WarehouseId == targetWh.Value);
                 }
                 else if (targetSite.HasValue)
                 {
