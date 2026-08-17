@@ -43,19 +43,18 @@ namespace Infrastructure.Services
             };
 
             // 1. Site Access Claims
-            var sitesList = allowedSites?.ToList() ?? new List<Site>();
-            if (user.Site != null && !sitesList.Any(s => s.Id == user.Site.Id))
-            {
-                sitesList.Add(user.Site);
-            }
-
             if (user.SiteId.HasValue)
             {
                 claims.Add(new Claim("siteId", user.SiteId.Value.ToString()));
                 claims.Add(new Claim("sites", user.SiteId.Value.ToString()));
             }
-            else if (sitesList.Any())
+            else
             {
+                var sitesList = allowedSites?.ToList() ?? new List<Site>();
+                if (user.Site != null && !sitesList.Any(s => s.Id == user.Site.Id))
+                {
+                    sitesList.Add(user.Site);
+                }
                 foreach (var site in sitesList)
                 {
                     claims.Add(new Claim("sites", site.Id.ToString()));
