@@ -111,6 +111,71 @@ namespace API.Controllers
             return Ok(new { count = createdIds.Count, ids = createdIds });
         }
 
+        [HttpPost("import-file")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> ImportFile(
+            [FromForm] Microsoft.AspNetCore.Http.IFormFile file,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest("No file uploaded.");
+
+            var createdIds = new List<Guid>();
+            using (var reader = new System.IO.StreamReader(file.OpenReadStream()))
+            {
+                string? line;
+                bool isHeader = true;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    if (isHeader)
+                    {
+                        isHeader = false;
+                        continue;
+                    }
+
+                    var parts = line.Split(',');
+                    if (parts.Length < 2) continue;
+
+                    var assetNumber = parts[0].Trim();
+                    var name = parts[1].Trim();
+                    var serialNumber = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2].Trim() : null;
+
+                    var command = new CreateAssetCommand(
+                        AssetNumber: assetNumber,
+                        Name: name,
+                        AssetCategoryId: Guid.Parse("a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"),
+                        Description: null,
+                        SerialNumber: serialNumber,
+                        Status: Domain.Enums.AssetStatus.Available,
+                        QrCode: null,
+                        Group: null,
+                        AssetType: "Serialized",
+                        OwnerDepartment: null,
+                        Industry: null,
+                        BusinessUnit: null,
+                        CurrentCustodian: null,
+                        CustodianEmail: null,
+                        Model: null,
+                        WarrantyProvider: null,
+                        PurchaseDate: null,
+                        PurchasePrice: null,
+                        WarrantyExpiryDate: null,
+                        ManufacturerId: null,
+                        SiteId: siteId,
+                        ZoneId: null,
+                        WarehouseId: warehouseId
+                    );
+
+                    var id = await _mediator.Send(command);
+                    createdIds.Add(id);
+                }
+            }
+
+            return Ok(new { success = true, count = createdIds.Count, ids = createdIds });
+        }
+
         [HttpPut("{id:guid}")]
         public async Task<IActionResult> Update(
             Guid id,
