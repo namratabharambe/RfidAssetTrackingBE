@@ -94,7 +94,7 @@ namespace API.Controllers
         }
 
         [HttpPost]
-        public async Task<Guid> Create(CreateAssetCommand command)
+        public async Task<Guid> Create([FromBody] CreateAssetCommand command)
         {
             return await _mediator.Send(command);
         }
@@ -114,7 +114,7 @@ namespace API.Controllers
         [HttpPost("import-file")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> ImportFile(
-            [FromForm] Microsoft.AspNetCore.Http.IFormFile file,
+            Microsoft.AspNetCore.Http.IFormFile file,
             [FromQuery] Guid? siteId = null,
             [FromQuery] Guid? warehouseId = null)
         {
@@ -196,6 +196,107 @@ namespace API.Controllers
                 new DeleteAssetCommand(id));
 
             return NoContent();
+        }
+
+        /// <summary>
+        /// GET /api/assets/asset-codes
+        /// Reads the active JWT access token (siteId or warehouseId claims).
+        /// Queries the Assets database table for asset numbers scoped to the active Site or Warehouse.
+        /// - If token contains Site -> Returns database Asset Numbers for that Site.
+        /// - If token contains Warehouse -> Returns database Asset Numbers for that Warehouse.
+        /// </summary>
+        [HttpGet("asset-codes")]
+        public async Task<ActionResult<AssetCodeResponseDto>> GetAssetCodes(
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
+        {
+            var tokenWhClaim = HttpContext.User.Claims
+                .FirstOrDefault(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id")?.Value;
+
+            var tokenSiteClaim = HttpContext.User.Claims
+                .FirstOrDefault(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id")?.Value;
+
+            Guid? tokenWhId = Guid.TryParse(tokenWhClaim, out var whG) ? whG : null;
+            Guid? tokenSiteId = Guid.TryParse(tokenSiteClaim, out var stG) ? stG : null;
+
+            var assetRepo = unitOfWork.Repository<Domain.Entities.Asset>();
+            var siteRepo = unitOfWork.Repository<Domain.Entities.Site>();
+            var whRepo = unitOfWork.Repository<Domain.Entities.Warehouse>();
+
+            var allSites = await siteRepo.GetAllAsync(cancellationToken);
+            var allWarehouses = await whRepo.GetAllAsync(cancellationToken);
+
+            var options = new List<AssetCodeOptionDto>();
+            string contextType = "Global";
+            string activeCode = "";
+            string activeName = "";
+
+            if (tokenWhId.HasValue)
+            {
+                contextType = "Warehouse";
+                var wh = allWarehouses.FirstOrDefault(w => w.Id == tokenWhId.Value);
+                activeName = wh?.Name ?? "Selected Warehouse";
+
+                var dbAssets = await assetRepo.GetFilteredAsync(a => a.WarehouseId == tokenWhId.Value && !a.IsDeleted, cancellationToken);
+                foreach (var asset in dbAssets)
+                {
+                    var code = !string.IsNullOrWhiteSpace(asset.AssetNumber) ? asset.AssetNumber : asset.Id.ToString();
+                    options.Add(new AssetCodeOptionDto("Asset", asset.Id, code, asset.Name, $"{code} ({asset.Name})"));
+                }
+
+                if (options.Count == 0 && wh != null)
+                {
+                    var whCode = !string.IsNullOrWhiteSpace(wh.Code) ? wh.Code : wh.Name;
+                    options.Add(new AssetCodeOptionDto("Warehouse", wh.Id, whCode, wh.Name, $"Warehouse Code: {whCode} ({wh.Name})"));
+                }
+
+                if (options.Count > 0)
+                {
+                    activeCode = options[0].Code;
+                }
+            }
+            else if (tokenSiteId.HasValue)
+            {
+                contextType = "Site";
+                var site = allSites.FirstOrDefault(s => s.Id == tokenSiteId.Value);
+                activeName = site?.Name ?? "Selected Site";
+
+                var dbAssets = await assetRepo.GetFilteredAsync(a => a.SiteId == tokenSiteId.Value && !a.IsDeleted, cancellationToken);
+                foreach (var asset in dbAssets)
+                {
+                    var code = !string.IsNullOrWhiteSpace(asset.AssetNumber) ? asset.AssetNumber : asset.Id.ToString();
+                    options.Add(new AssetCodeOptionDto("Asset", asset.Id, code, asset.Name, $"{code} ({asset.Name})"));
+                }
+
+                if (options.Count == 0 && site != null)
+                {
+                    var siteCode = !string.IsNullOrWhiteSpace(site.Code) ? site.Code : site.Name;
+                    options.Add(new AssetCodeOptionDto("Site", site.Id, siteCode, site.Name, $"Site Number: {siteCode} ({site.Name})"));
+                }
+
+                if (options.Count > 0)
+                {
+                    activeCode = options[0].Code;
+                }
+            }
+            else
+            {
+                contextType = "Global";
+                var dbAssets = await assetRepo.GetFilteredAsync(a => !a.IsDeleted, cancellationToken);
+                foreach (var asset in dbAssets.Take(200))
+                {
+                    var code = !string.IsNullOrWhiteSpace(asset.AssetNumber) ? asset.AssetNumber : asset.Id.ToString();
+                    options.Add(new AssetCodeOptionDto("Asset", asset.Id, code, asset.Name, $"{code} ({asset.Name})"));
+                }
+
+                if (options.Count > 0)
+                {
+                    activeCode = options[0].Code;
+                    activeName = options[0].Name;
+                }
+            }
+
+            return Ok(new AssetCodeResponseDto(contextType, activeCode, activeName, options));
         }
     }
 }
