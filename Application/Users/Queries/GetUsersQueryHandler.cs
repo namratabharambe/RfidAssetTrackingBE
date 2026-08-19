@@ -2,6 +2,7 @@ using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
 using MediatR;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -23,7 +24,32 @@ namespace Application.Users.Queries
 
         public async Task<IEnumerable<UserDto>> Handle(GetUsersQuery request, CancellationToken cancellationToken)
         {
-            var users = await _unitOfWork.Repository<User>().GetAllAsync(cancellationToken);
+            Guid? effectiveSiteId = request.SiteId;
+
+            if (!effectiveSiteId.HasValue && request.WarehouseId.HasValue)
+            {
+                var warehouse = await _unitOfWork.Repository<Warehouse>().GetByIdAsync(request.WarehouseId.Value, cancellationToken);
+                if (warehouse != null)
+                {
+                    effectiveSiteId = warehouse.SiteId;
+                }
+            }
+
+            List<User> users;
+            if (effectiveSiteId.HasValue)
+            {
+                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
+                    u => !u.IsDeleted && u.SiteId == effectiveSiteId.Value,
+                    cancellationToken
+                );
+            }
+            else
+            {
+                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
+                    u => !u.IsDeleted,
+                    cancellationToken
+                );
+            }
             
             // Populate roles and permissions
             foreach (var user in users)

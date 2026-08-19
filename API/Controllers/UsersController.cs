@@ -32,11 +32,40 @@ namespace API.Controllers
             _authService = authService;
         }
 
+        private Guid? CurrentUserSiteId
+        {
+            get
+            {
+                var claim = User.Claims
+                    .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
+        private Guid? CurrentUserWarehouseId
+        {
+            get
+            {
+                var claim = User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
         [AllowAnonymous]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
+        public async Task<ActionResult<IEnumerable<UserDto>>> GetAll(
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null)
         {
-            var users = await _mediator.Send(new GetUsersQuery());
+            var targetSiteId = siteId ?? CurrentUserSiteId;
+            var targetWarehouseId = warehouseId ?? CurrentUserWarehouseId;
+
+            var users = await _mediator.Send(new GetUsersQuery(targetSiteId, targetWarehouseId));
             return Ok(users);
         }
 
