@@ -38,10 +38,36 @@ namespace Application.DTOs
     public record ResetPasswordDto(string Token, string NewPassword);
     public record ChangePasswordDto(string CurrentPassword, string NewPassword);
 
-    public record RoleDto(Guid Id, string Name, string Description, List<PermissionDto> Permissions);
+    public record RoleDto
+    {
+        public Guid Id { get; init; }
+        public string Name { get; init; } = string.Empty;
+        public string Description { get; init; } = string.Empty;
+        public List<PermissionDto> Permissions { get; init; } = new();
+
+        public RoleDto() { }
+
+        public RoleDto(Guid id, string name, string description, List<PermissionDto>? permissions = null)
+        {
+            Id = id; Name = name; Description = description;
+            Permissions = permissions ?? new();
+        }
+    }
     public record CreateRoleDto(string Name, string Description, List<Guid> PermissionIds);
 
-    public record PermissionDto(Guid Id, string Name, string Code);
+    public record PermissionDto
+    {
+        public Guid Id { get; init; }
+        public string Name { get; init; } = string.Empty;
+        public string Code { get; init; } = string.Empty;
+
+        public PermissionDto() { }
+
+        public PermissionDto(Guid id, string name, string code)
+        {
+            Id = id; Name = name; Code = code;
+        }
+    }
 
     // Physical Structure DTOs
     public record SiteDto(Guid Id, string Code, string Name, string? Address);
