@@ -54,6 +54,11 @@ namespace Domain.Entities
         public string? PoNumber { get; set; }
         public string? Image { get; set; }
         
+        public decimal? EntryQty { get; set; }
+        public decimal? IssuedQty { get; set; }
+        public decimal? BalanceQty { get; set; }
+        public string? Unit { get; set; }
+        
         public ICollection<AssetImage> AssetImages { get; set; } = new List<AssetImage>();
         public ICollection<RFIDTag> RFIDTags { get; set; } = new List<RFIDTag>();
         public ICollection<Barcode> Barcodes { get; set; } = new List<Barcode>();
