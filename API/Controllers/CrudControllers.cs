@@ -236,6 +236,53 @@ namespace API.Controllers
     {
         public RolesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
+        [AllowAnonymous]
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<RoleDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var roles = await UnitOfWork.Repository<Role>().GetFilteredAsync(r => !r.IsDeleted, cancellationToken, r => r.RolePermissions);
+            foreach (var r in roles)
+            {
+                foreach (var rp in r.RolePermissions)
+                {
+                    if (rp.Permission == null)
+                    {
+                        var perm = await UnitOfWork.Repository<Permission>().GetByIdAsync(rp.PermissionId, cancellationToken);
+                        if (perm != null) rp.Permission = perm;
+                    }
+                }
+            }
+
+            var dtos = Mapper.Map<List<RoleDto>>(roles);
+            Response.Headers.Add("X-Total-Count", roles.Count.ToString());
+            return Ok(dtos);
+        }
+
+        [AllowAnonymous]
+        [HttpGet("{id:guid}")]
+        public override async Task<ActionResult<RoleDto>> GetById(Guid id, CancellationToken cancellationToken)
+        {
+            var role = await UnitOfWork.Repository<Role>().GetByIdAsync(id, cancellationToken, r => r.RolePermissions);
+            if (role == null) return NotFound();
+
+            foreach (var rp in role.RolePermissions)
+            {
+                if (rp.Permission == null)
+                {
+                    var perm = await UnitOfWork.Repository<Permission>().GetByIdAsync(rp.PermissionId, cancellationToken);
+                    if (perm != null) rp.Permission = perm;
+                }
+            }
+
+            return Ok(Mapper.Map<RoleDto>(role));
+        }
+
         public override async Task<ActionResult<RoleDto>> Create([FromBody] CreateRoleDto createDto, CancellationToken cancellationToken)
         {
             var role = Mapper.Map<Role>(createDto);
