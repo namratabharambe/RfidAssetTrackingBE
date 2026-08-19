@@ -153,6 +153,45 @@ namespace Application.DTOs
     public record AssetTransferDto(Guid Id, Guid AssetId, string AssetName, string AssetNumber, Guid SourceSiteId, string SourceSiteName, Guid DestinationSiteId, string DestinationSiteName, DateTime TransferDate, string Status, Guid RequestedByUserId, string RequestedByUsername, Guid? ApprovedByUserId, string? ApprovedByUsername, string? Remarks);
     public record CreateAssetTransferDto(Guid AssetId, Guid DestinationSiteId, string? Remarks);
 
+    public record IssueMaterialRequestDto(
+        Guid AssetId,
+        string? AssetNumber,
+        string? Name,
+        string IssuedToPerson,
+        string Contractor,
+        decimal IssueQuantity,
+        string? Unit,
+        string Purpose,
+        Guid SiteId,
+        string? SiteName,
+        DateTime? IssuedDate,
+        string? Remarks
+    );
+
+    public record AssetIssuanceDto
+    {
+        public Guid Id { get; init; }
+        public string IssueCode { get; init; } = string.Empty;
+        public Guid AssetId { get; init; }
+        public string AssetNumber { get; init; } = string.Empty;
+        public string AssetName { get; init; } = string.Empty;
+        public string IssuedToPerson { get; init; } = string.Empty;
+        public string Contractor { get; init; } = string.Empty;
+        public decimal IssueQuantity { get; init; }
+        public string Unit { get; init; } = string.Empty;
+        public string Purpose { get; init; } = string.Empty;
+        public Guid SiteId { get; init; }
+        public string SiteName { get; init; } = string.Empty;
+        public DateTime IssuedDate { get; init; }
+        public decimal PreviousIssuedQty { get; init; }
+        public decimal NewIssuedQty { get; init; }
+        public decimal PreviousBalanceQty { get; init; }
+        public decimal NewBalanceQty { get; init; }
+        public string? Remarks { get; init; }
+
+        public AssetIssuanceDto() { }
+    }
+
     public record AssetMovementDto
     {
         public Guid Id { get; set; }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -10,6 +10,7 @@ namespace Domain.Enums
         Assigned = 2,
         InTransit = 3,
         UnderMaintenance = 4,
-        Retired = 5
+        Retired = 5,
+        FullyIssued = 6
     }
 }

@@ -94,6 +94,8 @@ namespace Application.DTOs
                 .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
             CreateMap<CreateAssetTransferDto, AssetTransfer>();
 
+            CreateMap<AssetIssuance, AssetIssuanceDto>();
+
             CreateMap<AssetMovement, AssetMovementDto>()
                 .ForMember(dest => dest.AssetName, opt => opt.MapFrom(src => src.Asset.Name))
                 .ForMember(dest => dest.AssetNumber, opt => opt.MapFrom(src => src.Asset.AssetNumber))

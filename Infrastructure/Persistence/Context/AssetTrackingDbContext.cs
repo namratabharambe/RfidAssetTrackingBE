@@ -38,6 +38,7 @@ public class AssetTrackingDbContext : DbContext
     public DbSet<AssetAssignment> AssetAssignments => Set<AssetAssignment>();
     public DbSet<AssetTransfer> AssetTransfers => Set<AssetTransfer>();
     public DbSet<AssetMovement> AssetMovements => Set<AssetMovement>();
+    public DbSet<AssetIssuance> AssetIssuances => Set<AssetIssuance>();
     public DbSet<InventoryAudit> InventoryAudits => Set<InventoryAudit>();
     public DbSet<InventoryAuditItem> InventoryAuditItems => Set<InventoryAuditItem>();
     public DbSet<ScanSession> ScanSessions => Set<ScanSession>();
