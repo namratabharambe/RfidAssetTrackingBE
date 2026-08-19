@@ -162,8 +162,21 @@ namespace API.Controllers
                 var allSites = await _unitOfWork.Repository<Site>().GetAllAsync(cancellationToken);
                 var allWarehouses = await _unitOfWork.Repository<Warehouse>().GetAllAsync(cancellationToken);
 
-                Guid? targetSiteId = request.SiteId.HasValue ? request.SiteId.Value : user.SiteId;
                 Guid? targetWhId = request.WarehouseId;
+                Guid? targetSiteId = request.SiteId;
+
+                if (targetWhId.HasValue)
+                {
+                    var selectedWh = allWarehouses.FirstOrDefault(w => w.Id == targetWhId.Value);
+                    if (selectedWh != null)
+                    {
+                        targetSiteId = selectedWh.SiteId;
+                    }
+                }
+                if (!targetSiteId.HasValue)
+                {
+                    targetSiteId = user.SiteId;
+                }
 
                 user.SiteId = targetSiteId;
                 user.Site = null;
@@ -191,25 +204,62 @@ namespace API.Controllers
                 var audience = jwtSettings["Audience"] ?? "TrackItClient";
                 var expiresMinutes = Convert.ToInt32(jwtSettings["ExpiresMinutes"] ?? "525600");
 
-                var singleSiteContextList = targetSiteId.HasValue
-                    ? userAllowedSites.Where(s => s.Id == targetSiteId.Value).ToList()
-                    : userAllowedSites;
+                List<Site> siteContextList;
+                List<Warehouse> warehouseContextList;
 
-                var singleWhContextList = targetWhId.HasValue
-                    ? userAllowedWarehouses.Where(w => w.Id == targetWhId.Value).ToList()
-                    : new List<Warehouse>();
+                if (targetWhId.HasValue)
+                {
+                    // Warehouse selected: return ONLY warehouse data, NO site data
+                    warehouseContextList = userAllowedWarehouses.Where(w => w.Id == targetWhId.Value).ToList();
+                    siteContextList = new List<Site>();
+                }
+                else if (targetSiteId.HasValue)
+                {
+                    // Site selected: return ONLY site data, NO warehouse data
+                    siteContextList = userAllowedSites.Where(s => s.Id == targetSiteId.Value).ToList();
+                    warehouseContextList = new List<Warehouse>();
+                }
+                else
+                {
+                    // Global context: return all assigned sites and warehouses
+                    siteContextList = userAllowedSites;
+                    warehouseContextList = userAllowedWarehouses;
+                }
 
-                var newToken = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, singleSiteContextList, singleWhContextList);
+                user.SiteId = targetWhId.HasValue ? null : targetSiteId;
+                user.Site = null;
+
+                var newToken = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, siteContextList, warehouseContextList, targetWhId);
                 var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1", cancellationToken);
 
                 var rolesList = user.UserRoles.Select(ur => ur.Role?.Name ?? "User").Distinct().ToList();
                 var permissionsList = user.UserRoles.SelectMany(ur => ur.Role?.RolePermissions?.Select(rp => rp.Permission?.Code ?? "") ?? new List<string>()).Distinct().Where(p => !string.IsNullOrEmpty(p)).ToList();
 
-                var allowedSiteDtos = singleSiteContextList.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
-                var allowedWarehouseDtos = singleWhContextList.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
+                var allowedSiteDtos = siteContextList.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
+                var allowedWarehouseDtos = warehouseContextList.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
 
-                var activeSiteName = singleSiteContextList.FirstOrDefault(s => s.Id == targetSiteId)?.Name ?? user.Site?.Name;
-                var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, activeSiteName, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
+                string? activeContextName = null;
+                Guid? activeSiteGuid = null;
+
+                if (targetWhId.HasValue)
+                {
+                    var wh = warehouseContextList.FirstOrDefault();
+                    activeContextName = wh?.Name ?? "Warehouse";
+                    activeSiteGuid = null;
+                }
+                else if (targetSiteId.HasValue)
+                {
+                    var st = siteContextList.FirstOrDefault();
+                    activeContextName = st?.Name ?? "Site";
+                    activeSiteGuid = st?.Id;
+                }
+                else
+                {
+                    activeContextName = "All Contexts";
+                    activeSiteGuid = null;
+                }
+
+                var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, activeSiteGuid, activeContextName, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);
 
                 return Ok(new LoginResponseDto(newToken, refreshToken.Token, userDto));
             }

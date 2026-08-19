@@ -30,7 +30,7 @@ namespace Infrastructure.Services
             return Convert.ToBase64String(bytes);
         }
 
-        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes, IEnumerable<Site>? allowedSites = null, IEnumerable<Warehouse>? allowedWarehouses = null)
+        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes, IEnumerable<Site>? allowedSites = null, IEnumerable<Warehouse>? allowedWarehouses = null, Guid? activeWarehouseId = null)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.ASCII.GetBytes(secretKey);
@@ -92,7 +92,13 @@ namespace Infrastructure.Services
             {
                 warehousesList = warehousesList.Where(w => w.SiteId == user.SiteId.Value).ToList();
             }
-            if (warehousesList.Any())
+
+            if (activeWarehouseId.HasValue)
+            {
+                claims.Add(new Claim("warehouseId", activeWarehouseId.Value.ToString()));
+                claims.Add(new Claim("warehouses", activeWarehouseId.Value.ToString()));
+            }
+            else if (warehousesList.Any())
             {
                 foreach (var wh in warehousesList)
                 {

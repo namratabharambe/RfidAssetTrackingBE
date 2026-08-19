@@ -99,3 +99,18 @@ public record UpdateAssetDto(
     string? PoNumber = null,
     string? Image = null
 );
+
+public record AssetCodeOptionDto(
+    string Type,
+    Guid Id,
+    string Code,
+    string Name,
+    string DisplayLabel
+);
+
+public record AssetCodeResponseDto(
+    string ContextType,
+    string Code,
+    string Name,
+    List<AssetCodeOptionDto> Options
+);
