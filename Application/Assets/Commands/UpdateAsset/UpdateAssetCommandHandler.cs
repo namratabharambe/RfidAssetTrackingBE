@@ -49,17 +49,18 @@ namespace Application.Assets.Commands.UpdateAsset
             asset.CurrentCustodian = request.CurrentCustodian;
             asset.CustodianEmail = request.CustodianEmail;
             asset.Model = request.Model;
-            asset.WarrantyProvider = request.WarrantyProvider;
-            asset.PurchaseDate = request.PurchaseDate;
+            static DateTime? ToUtc(DateTime? dt) => dt.HasValue ? (dt.Value.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc) : dt.Value.ToUniversalTime()) : null;
+
+            asset.PurchaseDate = ToUtc(request.PurchaseDate);
             asset.PurchasePrice = request.PurchasePrice;
-            asset.WarrantyExpiryDate = request.WarrantyExpiryDate;
+            asset.WarrantyExpiryDate = ToUtc(request.WarrantyExpiryDate);
             asset.ManufacturerId = request.ManufacturerId;
             asset.SiteId = request.SiteId;
             asset.ZoneId = request.ZoneId;
             asset.WarehouseId = request.WarehouseId;
             asset.DeliveryChallanNo = request.DeliveryChallanNo;
             asset.InvoiceNumber = request.InvoiceNumber;
-            asset.InvoiceDate = request.InvoiceDate;
+            asset.InvoiceDate = ToUtc(request.InvoiceDate);
             asset.PoNumber = request.PoNumber;
             asset.Image = request.Image;
 

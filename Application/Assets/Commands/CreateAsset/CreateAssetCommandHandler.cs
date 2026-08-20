@@ -58,16 +58,16 @@ namespace Application.Assets.Commands.CreateAsset
                 if (request.CustodianEmail != null) existingAsset.CustodianEmail = request.CustodianEmail;
                 if (request.Model != null) existingAsset.Model = request.Model;
                 if (request.WarrantyProvider != null) existingAsset.WarrantyProvider = request.WarrantyProvider;
-                if (request.PurchaseDate.HasValue) existingAsset.PurchaseDate = request.PurchaseDate;
+                if (request.PurchaseDate.HasValue) existingAsset.PurchaseDate = ToUtc(request.PurchaseDate);
                 if (request.PurchasePrice.HasValue) existingAsset.PurchasePrice = request.PurchasePrice;
-                if (request.WarrantyExpiryDate.HasValue) existingAsset.WarrantyExpiryDate = request.WarrantyExpiryDate;
+                if (request.WarrantyExpiryDate.HasValue) existingAsset.WarrantyExpiryDate = ToUtc(request.WarrantyExpiryDate);
                 if (request.ManufacturerId.HasValue) existingAsset.ManufacturerId = request.ManufacturerId;
                 if (request.SiteId.HasValue) existingAsset.SiteId = request.SiteId;
                 if (request.ZoneId.HasValue) existingAsset.ZoneId = request.ZoneId;
                 if (request.WarehouseId.HasValue) existingAsset.WarehouseId = request.WarehouseId;
                 if (request.DeliveryChallanNo != null) existingAsset.DeliveryChallanNo = request.DeliveryChallanNo;
                 if (request.InvoiceNumber != null) existingAsset.InvoiceNumber = request.InvoiceNumber;
-                if (request.InvoiceDate.HasValue) existingAsset.InvoiceDate = request.InvoiceDate;
+                if (request.InvoiceDate.HasValue) existingAsset.InvoiceDate = ToUtc(request.InvoiceDate);
                 if (request.PoNumber != null) existingAsset.PoNumber = request.PoNumber;
                 if (request.Image != null) existingAsset.Image = request.Image;
 
@@ -99,17 +99,18 @@ namespace Application.Assets.Commands.CreateAsset
             asset.CurrentCustodian = request.CurrentCustodian;
             asset.CustodianEmail = request.CustodianEmail;
             asset.Model = request.Model;
-            asset.WarrantyProvider = request.WarrantyProvider;
-            asset.PurchaseDate = request.PurchaseDate;
+            static DateTime? ToUtc(DateTime? dt) => dt.HasValue ? (dt.Value.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc) : dt.Value.ToUniversalTime()) : null;
+
+            asset.PurchaseDate = ToUtc(request.PurchaseDate);
             asset.PurchasePrice = request.PurchasePrice;
-            asset.WarrantyExpiryDate = request.WarrantyExpiryDate;
+            asset.WarrantyExpiryDate = ToUtc(request.WarrantyExpiryDate);
             asset.ManufacturerId = request.ManufacturerId;
             asset.SiteId = request.SiteId;
             asset.ZoneId = request.ZoneId;
             asset.WarehouseId = request.WarehouseId;
             asset.DeliveryChallanNo = request.DeliveryChallanNo;
             asset.InvoiceNumber = request.InvoiceNumber;
-            asset.InvoiceDate = request.InvoiceDate;
+            asset.InvoiceDate = ToUtc(request.InvoiceDate);
             asset.PoNumber = request.PoNumber;
             asset.Image = request.Image;
 

@@ -97,17 +97,22 @@ namespace API.Controllers
         [HttpPost]
         public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserDto createDto, CancellationToken cancellationToken)
         {
-            // Validate Role IDs exist
-            if (createDto.RoleIds != null && createDto.RoleIds.Any())
+            // Resolve role names to Role IDs if role names are provided
+            var targetRoleIds = createDto.RoleIds != null ? new List<Guid>(createDto.RoleIds) : new List<Guid>();
+            if (createDto.Roles != null && createDto.Roles.Any())
             {
-                foreach (var roleId in createDto.RoleIds)
+                var allRoles = await _unitOfWork.Repository<Role>().GetAllAsync(cancellationToken);
+                foreach (var roleName in createDto.Roles)
                 {
-                    var role = await _unitOfWork.Repository<Role>().GetByIdAsync(roleId, cancellationToken);
-                    if (role == null)
-                    {
-                        return BadRequest($"Role with ID '{roleId}' does not exist.");
-                    }
+                    var r = allRoles.FirstOrDefault(x => x.Name.Equals(roleName, StringComparison.OrdinalIgnoreCase));
+                    if (r != null && !targetRoleIds.Contains(r.Id)) targetRoleIds.Add(r.Id);
                 }
+            }
+            if (!string.IsNullOrWhiteSpace(createDto.Role))
+            {
+                var allRoles = await _unitOfWork.Repository<Role>().GetAllAsync(cancellationToken);
+                var r = allRoles.FirstOrDefault(x => x.Name.Equals(createDto.Role, StringComparison.OrdinalIgnoreCase));
+                if (r != null && !targetRoleIds.Contains(r.Id)) targetRoleIds.Add(r.Id);
             }
 
             // Validate Site ID exists
@@ -116,7 +121,7 @@ namespace API.Controllers
                 var site = await _unitOfWork.Repository<Site>().GetByIdAsync(createDto.SiteId.Value, cancellationToken);
                 if (site == null)
                 {
-                    return BadRequest($"Site with ID '{createDto.SiteId}' does not exist.");
+                    createDto = createDto with { SiteId = null };
                 }
             }
 
@@ -136,9 +141,9 @@ namespace API.Controllers
             await _unitOfWork.Repository<User>().AddAsync(user, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            if (createDto.RoleIds != null)
+            if (targetRoleIds.Any())
             {
-                foreach (var roleId in createDto.RoleIds)
+                foreach (var roleId in targetRoleIds)
                 {
                     var userRole = new UserRole { UserId = user.Id, RoleId = roleId };
                     await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);

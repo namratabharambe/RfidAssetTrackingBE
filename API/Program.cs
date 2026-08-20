@@ -9,6 +9,8 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json.Serialization;
 
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.ClearProviders();
@@ -141,5 +143,11 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<AssetTrackingHub>("/api/hubs/trackit");
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AssetTrackingDbContext>();
+    await DatabaseSeeder.SeedAsync(dbContext);
+}
 
 app.Run();

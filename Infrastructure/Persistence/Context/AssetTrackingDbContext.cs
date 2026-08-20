@@ -84,5 +84,25 @@ public class AssetTrackingDbContext : DbContext
         modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentStatus>().HasKey(s => s.StatusId);
         modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentSeverity>().HasKey(s => s.SeverityId);
     }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var entries = ChangeTracker.Entries<Domain.Common.BaseEntity>();
+        foreach (var entry in entries)
+        {
+            if (entry.State == EntityState.Added)
+            {
+                if (entry.Entity.CreatedOn == default || entry.Entity.CreatedOn.Kind != DateTimeKind.Utc)
+                {
+                    entry.Entity.CreatedOn = DateTime.UtcNow;
+                }
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.UpdatedOn = DateTime.UtcNow;
+            }
+        }
+        return base.SaveChangesAsync(cancellationToken);
+    }
 }
 

@@ -85,11 +85,14 @@ namespace Application.DTOs
             CreateMap<CreateAssetAssignmentDto, AssetAssignment>();
 
             CreateMap<AssetTransfer, AssetTransferDto>()
-                .ForMember(dest => dest.AssetName, opt => opt.MapFrom(src => src.Asset.Name))
-                .ForMember(dest => dest.AssetNumber, opt => opt.MapFrom(src => src.Asset.AssetNumber))
-                .ForMember(dest => dest.SourceSiteName, opt => opt.MapFrom(src => src.SourceSite.Name))
-                .ForMember(dest => dest.DestinationSiteName, opt => opt.MapFrom(src => src.DestinationSite.Name))
-                .ForMember(dest => dest.RequestedByUsername, opt => opt.MapFrom(src => src.RequestedByUser.Username))
+                .ForMember(dest => dest.AssetName, opt => opt.MapFrom(src => src.Asset != null ? src.Asset.Name : src.ItemName))
+                .ForMember(dest => dest.AssetNumber, opt => opt.MapFrom(src => src.Asset != null ? src.Asset.AssetNumber : ""))
+                .ForMember(dest => dest.ItemName, opt => opt.MapFrom(src => src.ItemName ?? (src.Asset != null ? src.Asset.Name : null)))
+                .ForMember(dest => dest.SourceSiteName, opt => opt.MapFrom(src => src.SourceSite != null ? src.SourceSite.Name : ""))
+                .ForMember(dest => dest.DestinationSiteName, opt => opt.MapFrom(src => src.DestinationSite != null ? src.DestinationSite.Name : ""))
+                .ForMember(dest => dest.SourceLocationName, opt => opt.MapFrom(src => src.SourceLocation != null ? src.SourceLocation.Name : null))
+                .ForMember(dest => dest.DestinationLocationName, opt => opt.MapFrom(src => src.DestinationLocation != null ? src.DestinationLocation.Name : null))
+                .ForMember(dest => dest.RequestedByUsername, opt => opt.MapFrom(src => src.RequestedByUser != null ? src.RequestedByUser.Username : ""))
                 .ForMember(dest => dest.ApprovedByUsername, opt => opt.MapFrom(src => src.ApprovedByUser != null ? src.ApprovedByUser.Username : null))
                 .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
             CreateMap<CreateAssetTransferDto, AssetTransfer>();

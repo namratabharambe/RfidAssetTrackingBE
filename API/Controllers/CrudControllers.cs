@@ -771,6 +771,8 @@ namespace API.Controllers
                 x => x.Asset,
                 x => x.SourceSite,
                 x => x.DestinationSite,
+                x => x.SourceLocation,
+                x => x.DestinationLocation,
                 x => x.RequestedByUser,
                 x => x.ApprovedByUser);
             Response.Headers.Add("X-Total-Count", total.ToString());
@@ -786,6 +788,8 @@ namespace API.Controllers
                 x => x.Asset,
                 x => x.SourceSite,
                 x => x.DestinationSite,
+                x => x.SourceLocation,
+                x => x.DestinationLocation,
                 x => x.RequestedByUser,
                 x => x.ApprovedByUser);
             if (entity == null) return NotFound();
