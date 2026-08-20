@@ -298,5 +298,119 @@ namespace API.Controllers
 
             return Ok(new AssetCodeResponseDto(contextType, activeCode, activeName, options));
         }
+
+        [HttpPost("transfer/central-to-site")]
+        public async Task<IActionResult> CentralToSiteTransfer(
+            [FromBody] CentralToSiteTransferDto request,
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
+        {
+            var assetRepo = unitOfWork.Repository<Domain.Entities.Asset>();
+            var siteRepo = unitOfWork.Repository<Domain.Entities.Site>();
+            var whRepo = unitOfWork.Repository<Domain.Entities.Warehouse>();
+            
+            var asset = (await assetRepo.GetFilteredAsync(a => a.AssetNumber == request.assetCode || a.Name == request.assetName || !a.IsDeleted, cancellationToken)).FirstOrDefault();
+            var wh = await whRepo.GetByIdAsync(request.fromWarehouseId, cancellationToken);
+            var firstSiteId = (await siteRepo.GetAllAsync(cancellationToken)).First().Id;
+
+            Guid srcSiteId = wh?.SiteId ?? (await siteRepo.GetByIdAsync(request.fromWarehouseId, cancellationToken) != null ? request.fromWarehouseId : firstSiteId);
+            Guid dstSiteId = (await siteRepo.GetByIdAsync(request.toSiteId, cancellationToken)) != null ? request.toSiteId : firstSiteId;
+
+            var userClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            Guid currentUserId = Guid.TryParse(userClaim, out var uG) ? uG : (await unitOfWork.Repository<Domain.Entities.User>().GetAllAsync(cancellationToken)).First().Id;
+
+            var transfer = new Domain.Entities.AssetTransfer
+            {
+                AssetId = asset != null ? asset.Id : (await assetRepo.GetAllAsync(cancellationToken)).First().Id,
+                ItemName = request.assetName ?? asset?.Name ?? "Galvanized Steel Pipes",
+                SourceSiteId = srcSiteId,
+                DestinationSiteId = dstSiteId,
+                Quantity = request.quantity > 0 ? request.quantity : 1,
+                Unit = request.unit ?? "PCS",
+                DeliveryChallanNo = request.deliveryChallanNo,
+                Image = request.transferPhoto,
+                TransferDate = DateTime.UtcNow,
+                Status = Domain.Enums.TransferStatus.Pending,
+                RequestedByUserId = currentUserId,
+                Remarks = "Central Store to Site Dispatch"
+            };
+
+            await unitOfWork.Repository<Domain.Entities.AssetTransfer>().AddAsync(transfer, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Ok(new { success = true, message = "Central Store to Site transfer recorded successfully.", transferId = transfer.Id });
+        }
+
+        [HttpPost("transfer/surplus-return")]
+        public async Task<IActionResult> SurplusReturnTransfer(
+            [FromBody] SurplusReturnTransferDto request,
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
+        {
+            var assetRepo = unitOfWork.Repository<Domain.Entities.Asset>();
+            var siteRepo = unitOfWork.Repository<Domain.Entities.Site>();
+            var whRepo = unitOfWork.Repository<Domain.Entities.Warehouse>();
+
+            var asset = (await assetRepo.GetFilteredAsync(a => a.AssetNumber == request.assetCode || a.Name == request.assetName || !a.IsDeleted, cancellationToken)).FirstOrDefault();
+            var wh = await whRepo.GetByIdAsync(request.toWarehouseId, cancellationToken);
+            var firstSiteId = (await siteRepo.GetAllAsync(cancellationToken)).First().Id;
+
+            Guid srcSiteId = (await siteRepo.GetByIdAsync(request.fromSiteId, cancellationToken)) != null ? request.fromSiteId : firstSiteId;
+            Guid dstSiteId = wh?.SiteId ?? (await siteRepo.GetByIdAsync(request.toWarehouseId, cancellationToken) != null ? request.toWarehouseId : firstSiteId);
+
+            var userClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            Guid currentUserId = Guid.TryParse(userClaim, out var uG) ? uG : (await unitOfWork.Repository<Domain.Entities.User>().GetAllAsync(cancellationToken)).First().Id;
+
+            var transfer = new Domain.Entities.AssetTransfer
+            {
+                AssetId = asset != null ? asset.Id : (await assetRepo.GetAllAsync(cancellationToken)).First().Id,
+                ItemName = request.assetName ?? asset?.Name ?? "Surplus Cement Sacks",
+                SourceSiteId = srcSiteId,
+                DestinationSiteId = dstSiteId,
+                Quantity = request.quantity > 0 ? request.quantity : 1,
+                Unit = request.unit ?? "Sacks",
+                TransferDate = DateTime.UtcNow,
+                Status = Domain.Enums.TransferStatus.Pending,
+                RequestedByUserId = currentUserId,
+                Remarks = "Surplus Return (Site to Central Store)"
+            };
+
+            await unitOfWork.Repository<Domain.Entities.AssetTransfer>().AddAsync(transfer, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Ok(new { success = true, message = "Surplus Return transfer recorded successfully.", transferId = transfer.Id });
+        }
+
+        [HttpPost("transfer/site-to-site")]
+        public async Task<IActionResult> SiteToSiteTransfer(
+            [FromBody] SiteToSiteTransferDto request,
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
+        {
+            var assetRepo = unitOfWork.Repository<Domain.Entities.Asset>();
+            var asset = (await assetRepo.GetFilteredAsync(a => a.AssetNumber == request.assetCode || a.Name == request.assetName || !a.IsDeleted, cancellationToken)).FirstOrDefault();
+
+            var userClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            Guid currentUserId = Guid.TryParse(userClaim, out var uG) ? uG : (await unitOfWork.Repository<Domain.Entities.User>().GetAllAsync(cancellationToken)).First().Id;
+
+            var transfer = new Domain.Entities.AssetTransfer
+            {
+                AssetId = asset != null ? asset.Id : (await assetRepo.GetAllAsync(cancellationToken)).First().Id,
+                ItemName = request.assetName ?? asset?.Name ?? "Steel Pipes",
+                SourceSiteId = request.fromSiteId,
+                DestinationSiteId = request.toSiteId,
+                Quantity = request.quantity > 0 ? request.quantity : 1,
+                Unit = "PCS",
+                TransferDate = DateTime.UtcNow,
+                Status = Domain.Enums.TransferStatus.Pending,
+                RequestedByUserId = currentUserId,
+                Remarks = "Direct Site to Site Transfer"
+            };
+
+            await unitOfWork.Repository<Domain.Entities.AssetTransfer>().AddAsync(transfer, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Ok(new { success = true, message = "Site to Site transfer recorded successfully.", transferId = transfer.Id });
+        }
     }
 }

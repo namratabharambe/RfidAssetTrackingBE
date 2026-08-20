@@ -20,6 +20,50 @@ namespace Infrastructure.Persistence.Context
 
         public static async Task SeedAsync(AssetTrackingDbContext context)
         {
+            // 0. Ensure schema columns and tables exist
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""EntryQty"" numeric;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""IssuedQty"" numeric;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""BalanceQty"" numeric;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""Unit"" text;
+
+                    CREATE TABLE IF NOT EXISTS ""AssetIssuances"" (
+                        ""Id"" uuid NOT NULL PRIMARY KEY,
+                        ""IssueCode"" text NOT NULL,
+                        ""AssetId"" uuid NOT NULL REFERENCES ""Assets""(""Id"") ON DELETE CASCADE,
+                        ""AssetNumber"" text NOT NULL,
+                        ""AssetName"" text NOT NULL,
+                        ""IssuedToPerson"" text NOT NULL,
+                        ""Contractor"" text NOT NULL,
+                        ""IssueQuantity"" numeric NOT NULL,
+                        ""Unit"" text NOT NULL,
+                        ""Purpose"" text NOT NULL,
+                        ""SiteId"" uuid NOT NULL REFERENCES ""Sites""(""Id"") ON DELETE RESTRICT,
+                        ""SiteName"" text NOT NULL,
+                        ""IssuedDate"" timestamp with time zone NOT NULL,
+                        ""PreviousIssuedQty"" numeric NOT NULL,
+                        ""NewIssuedQty"" numeric NOT NULL,
+                        ""PreviousBalanceQty"" numeric NOT NULL,
+                        ""NewBalanceQty"" numeric NOT NULL,
+                        ""IssuedByUserId"" uuid REFERENCES ""Users""(""Id"") ON DELETE SET NULL,
+                        ""Remarks"" text,
+                        ""CreatedOn"" timestamp with time zone NOT NULL,
+                        ""UpdatedOn"" timestamp with time zone,
+                        ""DeletedOn"" timestamp with time zone,
+                        ""CreatedBy"" text,
+                        ""UpdatedBy"" text,
+                        ""DeletedBy"" text,
+                        ""IsDeleted"" boolean NOT NULL DEFAULT FALSE,
+                        ""RowVersion"" bytea
+                    );
+                ");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Schema Migration Warning]: {ex.Message}");
+            }
             // 1. Seed Roles
             var rolesToSeed = new System.Collections.Generic.List<Role>
             {

@@ -28,8 +28,8 @@ namespace Application.DTOs
             AllowedWarehouses = allowedWarehouses ?? new();
         }
     }
-    public record CreateUserDto(string Username, string Email, string Password, List<Guid> RoleIds, Guid? SiteId = null);
-    public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid> RoleIds, Guid? SiteId = null);
+    public record CreateUserDto(string Username, string Email, string Password, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null);
+    public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null);
     public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
     public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null);
@@ -150,8 +150,75 @@ namespace Application.DTOs
     }
     public record CreateAssetAssignmentDto(Guid AssetId, Guid AssignedToUserId, string? CustodianName, DateTime? ExpectedReturnDate, string? Purpose, string? Notes);
 
-    public record AssetTransferDto(Guid Id, Guid AssetId, string AssetName, string AssetNumber, Guid SourceSiteId, string SourceSiteName, Guid DestinationSiteId, string DestinationSiteName, DateTime TransferDate, string Status, Guid RequestedByUserId, string RequestedByUsername, Guid? ApprovedByUserId, string? ApprovedByUsername, string? Remarks);
-    public record CreateAssetTransferDto(Guid AssetId, Guid DestinationSiteId, string? Remarks);
+    public record AssetTransferDto(
+        Guid Id,
+        Guid AssetId,
+        string AssetName,
+        string AssetNumber,
+        string? ItemName,
+        Guid SourceSiteId,
+        string SourceSiteName,
+        Guid DestinationSiteId,
+        string DestinationSiteName,
+        Guid? SourceLocationId,
+        string? SourceLocationName,
+        Guid? DestinationLocationId,
+        string? DestinationLocationName,
+        decimal Quantity,
+        string? Unit,
+        string? Image,
+        string? DeliveryChallanNo,
+        string? InvoiceNumber,
+        DateTime TransferDate,
+        string Status,
+        Guid RequestedByUserId,
+        string RequestedByUsername,
+        Guid? ApprovedByUserId,
+        string? ApprovedByUsername,
+        string? Remarks
+    );
+
+    public record CreateAssetTransferDto(
+        Guid AssetId,
+        string? ItemName,
+        Guid DestinationSiteId,
+        Guid? SourceLocationId = null,
+        Guid? DestinationLocationId = null,
+        decimal Quantity = 1,
+        string? Unit = null,
+        string? Image = null,
+        string? DeliveryChallanNo = null,
+        string? InvoiceNumber = null,
+        string? Remarks = null
+    );
+
+    public record CentralToSiteTransferDto(
+        Guid fromWarehouseId,
+        Guid toSiteId,
+        string assetCode,
+        string assetName,
+        decimal quantity,
+        string? unit = null,
+        string? deliveryChallanNo = null,
+        string? transferPhoto = null
+    );
+
+    public record SurplusReturnTransferDto(
+        Guid fromSiteId,
+        Guid toWarehouseId,
+        string assetCode,
+        string assetName,
+        decimal quantity,
+        string? unit = null
+    );
+
+    public record SiteToSiteTransferDto(
+        Guid fromSiteId,
+        Guid toSiteId,
+        string assetCode,
+        string assetName,
+        decimal quantity
+    );
 
     public record IssueMaterialRequestDto(
         Guid AssetId,
