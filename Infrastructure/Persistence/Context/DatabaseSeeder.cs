@@ -69,6 +69,9 @@ namespace Infrastructure.Persistence.Context
             {
                 new Role { Id = Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62"), Name = "Super Admin", Description = "System Administrator with full access across all sites" },
                 new Role { Id = Guid.Parse("e2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62"), Name = "Site Admin", Description = "Site Administrator restricted to their assigned site" },
+                new Role { Id = Guid.Parse("0e9d0e01-c0a0-438d-a823-0544dc67ad6f"), Name = "Project Manager", Description = "Project Manager with site and project operational management access" },
+                new Role { Id = Guid.Parse("e68f87f4-8b80-4d37-b787-a660dc0f8a56"), Name = "Store Keeper", Description = "Store Keeper responsible for inventory issues, receipts, and warehouse tracking" },
+                new Role { Id = Guid.Parse("a5736683-b651-4b38-aa67-5a07baa4d156"), Name = "Safety", Description = "Safety Officer responsible for equipment compliance, certifications, and safety inspections" },
                 new Role { Id = Guid.Parse("e3a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62"), Name = "Supervisor", Description = "Yard Supervisor restricted to operations at their assigned site" },
                 new Role { Id = Guid.Parse("e4a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62"), Name = "Driver", Description = "Vehicle Driver with restricted access to mobile GPS operations" },
                 new Role { Id = Guid.Parse("e5a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62"), Name = "Viewer", Description = "Read-only access to dashboard data" }
@@ -262,38 +265,7 @@ namespace Infrastructure.Persistence.Context
                 await context.SaveChangesAsync();
             }
 
-            // Seed Assets for Devam Sites if Assets table has no assets for Alpha / Project
-            if (!await context.Assets.AnyAsync(a => a.SiteId == devamAlphaId))
-            {
-                await context.Assets.AddRangeAsync(
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-001", Name = "High Performance Server Rack - Alpha", Status = AssetStatus.Available, AssetCategoryId = ITAssetsId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "IT Infrastructure" },
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-002", Name = "Forklift Heavy Lifter 5T - Alpha", Status = AssetStatus.Assigned, AssetCategoryId = VehiclesId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Material Handling" },
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-003", Name = "Industrial Generator 500kVA", Status = AssetStatus.Available, AssetCategoryId = PowerEquipmentId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Power Equipment" },
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-ALPHA-004", Name = "Returnable Transit Pallet Bin #104", Status = AssetStatus.UnderMaintenance, AssetCategoryId = ReturnableContainerId, SiteId = devamAlphaId, WarehouseId = devamWhId, Group = "Returnables" }
-                );
-                await context.SaveChangesAsync();
-            }
-
-            if (!await context.Assets.AnyAsync(a => a.SiteId == devamProjectId))
-            {
-                await context.Assets.AddRangeAsync(
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-001", Name = "Mobile Crane 20T - Project Site", Status = AssetStatus.Assigned, AssetCategoryId = VehiclesId, SiteId = devamProjectId, Group = "Heavy Equipment" },
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-002", Name = "Site Field Workstation Laptop #02", Status = AssetStatus.Available, AssetCategoryId = ITAssetsId, SiteId = devamProjectId, Group = "IT Equipment" },
-                    new Asset { Id = Guid.NewGuid(), AssetNumber = "AST-PROJ-003", Name = "Project Site Container Store #05", Status = AssetStatus.Available, AssetCategoryId = ReturnableContainerId, SiteId = devamProjectId, Group = "Containers" }
-                );
-                await context.SaveChangesAsync();
-            }
-
-            // Ensure all Devam Alpha Site assets are assigned to Devam Central Store Main Warehouse
-            var alphaAssets = await context.Assets.Where(a => a.SiteId == devamAlphaId && (a.WarehouseId == null || a.WarehouseId != devamWhId)).ToListAsync();
-            if (alphaAssets.Any())
-            {
-                foreach (var a in alphaAssets)
-                {
-                    a.WarehouseId = devamWhId;
-                }
-                await context.SaveChangesAsync();
-            }
+            // Demo assets seeding removed to maintain clean master-only state.
 
             // 5. Seed default Handheld Device
             if (!await context.HandheldDevices.AnyAsync())

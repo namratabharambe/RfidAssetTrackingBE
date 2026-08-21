@@ -12,7 +12,9 @@ namespace Application.DTOs
             CreateMap<User, UserDto>()
                 .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles.Select(ur => ur.Role.Name).ToList()))
                 .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src => src.UserRoles.SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code)).Distinct().ToList()))
-                .ForMember(dest => dest.SiteName, opt => opt.MapFrom(src => src.Site != null ? src.Site.Name : null));
+                .ForMember(dest => dest.SiteName, opt => opt.MapFrom(src => src.Site != null ? src.Site.Name : null))
+                .ForMember(dest => dest.SelectedSiteIds, opt => opt.MapFrom(src => ParseGuidList(src.AllowedSiteIds, src.SiteId)))
+                .ForMember(dest => dest.SelectedWarehouseIds, opt => opt.MapFrom(src => ParseGuidList(src.AllowedWarehouseIds, null)));
             CreateMap<CreateUserDto, User>();
 
             CreateMap<Role, RoleDto>()
@@ -137,6 +139,27 @@ namespace Application.DTOs
 
             CreateMap<Settings, SettingsDto>();
             CreateMap<CreateSettingsDto, Settings>();
+        }
+
+        private static System.Collections.Generic.List<System.Guid> ParseGuidList(string? commaSeparated, System.Guid? fallbackId)
+        {
+            var list = new System.Collections.Generic.List<System.Guid>();
+            if (!string.IsNullOrWhiteSpace(commaSeparated))
+            {
+                var parts = commaSeparated.Split(',', System.StringSplitOptions.RemoveEmptyEntries);
+                foreach (var part in parts)
+                {
+                    if (System.Guid.TryParse(part.Trim(), out var g))
+                    {
+                        list.Add(g);
+                    }
+                }
+            }
+            if (!list.Any() && fallbackId.HasValue)
+            {
+                list.Add(fallbackId.Value);
+            }
+            return list;
         }
     }
 

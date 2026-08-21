@@ -16,20 +16,24 @@ namespace Application.DTOs
         public List<string> Permissions { get; init; } = new();
         public List<SiteDto> AllowedSites { get; init; } = new();
         public List<WarehouseDto> AllowedWarehouses { get; init; } = new();
+        public List<Guid> SelectedSiteIds { get; init; } = new();
+        public List<Guid> SelectedWarehouseIds { get; init; } = new();
         public string Status => IsActive ? "Active" : "Inactive";
 
         public UserDto() { }
 
-        public UserDto(Guid id, string username, string email, bool isActive, Guid? siteId, string? siteName, List<string> roles, List<string> permissions, List<SiteDto>? allowedSites = null, List<WarehouseDto>? allowedWarehouses = null)
+        public UserDto(Guid id, string username, string email, bool isActive, Guid? siteId, string? siteName, List<string> roles, List<string> permissions, List<SiteDto>? allowedSites = null, List<WarehouseDto>? allowedWarehouses = null, List<Guid>? selectedSiteIds = null, List<Guid>? selectedWarehouseIds = null)
         {
             Id = id; Username = username; Email = email; IsActive = isActive;
             SiteId = siteId; SiteName = siteName; Roles = roles; Permissions = permissions;
             AllowedSites = allowedSites ?? new();
             AllowedWarehouses = allowedWarehouses ?? new();
+            SelectedSiteIds = selectedSiteIds ?? new();
+            SelectedWarehouseIds = selectedWarehouseIds ?? new();
         }
     }
-    public record CreateUserDto(string Username, string Email, string Password, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null);
-    public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null);
+    public record CreateUserDto(string Username, string Email, string Password, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null, List<Guid>? AllowedSiteIds = null, List<Guid>? AllowedWarehouseIds = null);
+    public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null, List<Guid>? AllowedSiteIds = null, List<Guid>? AllowedWarehouseIds = null);
     public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
     public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null);

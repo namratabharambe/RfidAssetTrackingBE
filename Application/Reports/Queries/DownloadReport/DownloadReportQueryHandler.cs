@@ -19,13 +19,15 @@ namespace Application.Reports.Queries.DownloadReport
         {
             return request.ReportType.ToLower() switch
             {
-                "assets" => await _reportService.GenerateAssetReportAsync("csv", cancellationToken),
-                "movements" => await _reportService.GenerateMovementReportAsync("csv", cancellationToken),
-                "inventory" => await _reportService.GenerateInventoryReportAsync("csv", cancellationToken),
-                "rfid" => await _reportService.GenerateRFIDReportAsync("csv", cancellationToken),
-                "gps" => await _reportService.GenerateGPSReportAsync("csv", cancellationToken),
-                "audits" => await _reportService.GenerateAuditReportAsync("csv", cancellationToken),
-                "users" => await _reportService.GenerateUserReportAsync("csv", cancellationToken),
+                "assets" => await _reportService.GenerateAssetReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "movements" => await _reportService.GenerateMovementReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "inventory" => await _reportService.GenerateInventoryReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "rfid" => await _reportService.GenerateRFIDReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "gps" => await _reportService.GenerateGPSReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "audits" => await _reportService.GenerateAuditReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "users" => await _reportService.GenerateUserReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "transfers" or "transfer" => await _reportService.GenerateTransferReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
+                "issuances" or "issuance" or "issues" or "issue" => await _reportService.GenerateIssuanceReportAsync("csv", request.StartDate, request.EndDate, request.SiteId, request.SiteName, cancellationToken),
                 _ => throw new ArgumentException("Invalid report type")
             };
         }
