@@ -62,10 +62,24 @@ namespace API.Controllers
             [FromQuery] Guid? siteId = null,
             [FromQuery] Guid? warehouseId = null)
         {
+            var identity = User.Identity?.Name 
+                ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
+                ?? "";
+
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+
+            var allowedSiteIds = User.Claims
+                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToList();
+
             var targetSiteId = siteId ?? CurrentUserSiteId;
             var targetWarehouseId = warehouseId ?? CurrentUserWarehouseId;
 
-            var users = await _mediator.Send(new GetUsersQuery(targetSiteId, targetWarehouseId));
+            var users = await _mediator.Send(new GetUsersQuery(targetSiteId, targetWarehouseId, allowedSiteIds, identity, isSuperAdmin));
             return Ok(users);
         }
 
@@ -128,6 +142,16 @@ namespace API.Controllers
             var salt = _authService.GenerateSalt();
             var hash = _authService.HashPassword(createDto.Password, salt);
 
+            var allowedSitesStr = (createDto.AllowedSiteIds != null && createDto.AllowedSiteIds.Any())
+                ? string.Join(",", createDto.AllowedSiteIds)
+                : (createDto.SiteId.HasValue ? createDto.SiteId.Value.ToString() : null);
+
+            var allowedWhsStr = (createDto.AllowedWarehouseIds != null && createDto.AllowedWarehouseIds.Any())
+                ? string.Join(",", createDto.AllowedWarehouseIds)
+                : null;
+
+            var primarySiteId = createDto.SiteId ?? (createDto.AllowedSiteIds != null && createDto.AllowedSiteIds.Any() ? createDto.AllowedSiteIds.First() : null);
+
             var user = new User
             {
                 Username = createDto.Username,
@@ -135,7 +159,9 @@ namespace API.Controllers
                 PasswordHash = hash,
                 PasswordSalt = salt,
                 IsActive = true,
-                SiteId = createDto.SiteId
+                SiteId = primarySiteId,
+                AllowedSiteIds = allowedSitesStr,
+                AllowedWarehouseIds = allowedWhsStr
             };
 
             await _unitOfWork.Repository<User>().AddAsync(user, cancellationToken);
@@ -204,10 +230,22 @@ namespace API.Controllers
             var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
             if (user == null) return NotFound();
 
+            var allowedSitesStr = (updateDto.AllowedSiteIds != null && updateDto.AllowedSiteIds.Any())
+                ? string.Join(",", updateDto.AllowedSiteIds)
+                : (updateDto.SiteId.HasValue ? updateDto.SiteId.Value.ToString() : user.AllowedSiteIds);
+
+            var allowedWhsStr = (updateDto.AllowedWarehouseIds != null && updateDto.AllowedWarehouseIds.Any())
+                ? string.Join(",", updateDto.AllowedWarehouseIds)
+                : user.AllowedWarehouseIds;
+
+            var primarySiteId = updateDto.SiteId ?? (updateDto.AllowedSiteIds != null && updateDto.AllowedSiteIds.Any() ? updateDto.AllowedSiteIds.First() : user.SiteId);
+
             user.Username = updateDto.Username;
             user.Email = updateDto.Email;
             user.IsActive = updateDto.IsActive;
-            user.SiteId = updateDto.SiteId;
+            user.SiteId = primarySiteId;
+            user.AllowedSiteIds = allowedSitesStr;
+            user.AllowedWarehouseIds = allowedWhsStr;
 
             userRepo.Update(user);
 

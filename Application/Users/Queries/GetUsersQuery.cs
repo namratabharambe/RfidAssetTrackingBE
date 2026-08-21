@@ -5,5 +5,11 @@ using System.Collections.Generic;
 
 namespace Application.Users.Queries
 {
-    public record GetUsersQuery(Guid? SiteId = null, Guid? WarehouseId = null) : IRequest<IEnumerable<UserDto>>;
+    public record GetUsersQuery(
+        Guid? SiteId = null, 
+        Guid? WarehouseId = null, 
+        List<Guid>? AllowedSiteIds = null, 
+        string? CurrentUserIdentity = null, 
+        bool IsSuperAdmin = false
+    ) : IRequest<IEnumerable<UserDto>>;
 }

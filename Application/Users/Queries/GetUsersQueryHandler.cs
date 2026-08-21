@@ -24,6 +24,9 @@ namespace Application.Users.Queries
 
         public async Task<IEnumerable<UserDto>> Handle(GetUsersQuery request, CancellationToken cancellationToken)
         {
+            var identityLower = (request.CurrentUserIdentity ?? "").Trim().ToLower();
+            bool isDevamContext = identityLower.Contains("devam");
+
             Guid? effectiveSiteId = request.SiteId;
 
             if (!effectiveSiteId.HasValue && request.WarehouseId.HasValue)
@@ -36,7 +39,43 @@ namespace Application.Users.Queries
             }
 
             List<User> users;
-            if (effectiveSiteId.HasValue)
+
+            if (isDevamContext)
+            {
+                // Isolate Devam tenant: return only users associated with Devam
+                var devamSites = await _unitOfWork.Repository<Site>().GetFilteredAsync(
+                    s => !s.IsDeleted && (s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")),
+                    cancellationToken
+                );
+                var devamSiteIds = devamSites.Select(s => (Guid?)s.Id).ToList();
+
+                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
+                    u => !u.IsDeleted && (
+                        (u.SiteId.HasValue && devamSiteIds.Contains(u.SiteId)) ||
+                        u.Username.ToLower().Contains("devam") ||
+                        u.Email.ToLower().Contains("devam")
+                    ),
+                    cancellationToken
+                );
+            }
+            else if (request.AllowedSiteIds != null && request.AllowedSiteIds.Any() && !request.IsSuperAdmin)
+            {
+                var allowedIds = request.AllowedSiteIds.Select(id => (Guid?)id).ToList();
+                var allowedIdStrings = request.AllowedSiteIds.Select(id => id.ToString().ToLower()).ToList();
+
+                var allActiveUsers = await _unitOfWork.Repository<User>().GetFilteredAsync(
+                    u => !u.IsDeleted,
+                    cancellationToken
+                );
+
+                users = allActiveUsers.Where(u => 
+                    (u.SiteId.HasValue && allowedIds.Contains(u.SiteId)) ||
+                    (!string.IsNullOrEmpty(u.AllowedSiteIds) && allowedIdStrings.Any(aid => u.AllowedSiteIds.ToLower().Contains(aid))) ||
+                    u.Username.Equals(identityLower, StringComparison.OrdinalIgnoreCase) ||
+                    u.Email.Equals(identityLower, StringComparison.OrdinalIgnoreCase)
+                ).ToList();
+            }
+            else if (effectiveSiteId.HasValue && !request.IsSuperAdmin)
             {
                 users = await _unitOfWork.Repository<User>().GetFilteredAsync(
                     u => !u.IsDeleted && u.SiteId == effectiveSiteId.Value,

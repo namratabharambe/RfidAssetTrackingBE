@@ -14,6 +14,8 @@ namespace Domain.Entities
         /// <summary>Null = SuperAdmin (all sites). Set = restricted to this site.</summary>
         public Guid? SiteId { get; set; }
         public Site? Site { get; set; }
+        public string? AllowedSiteIds { get; set; }
+        public string? AllowedWarehouseIds { get; set; }
         public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     }
 }

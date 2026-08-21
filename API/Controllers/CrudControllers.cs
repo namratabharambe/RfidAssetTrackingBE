@@ -339,10 +339,45 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Site>();
-            var filter = BuildCombinedFilter(siteId, warehouseId);
-            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
-            Response.Headers.Add("X-Total-Count", total.ToString());
-            return Ok(Mapper.Map<List<SiteDto>>(items));
+            var allSites = await repo.GetAllAsync(cancellationToken);
+
+            var identity = User.Identity?.Name 
+                ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
+                ?? "";
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+
+            var allowedSiteIds = User.Claims
+                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            IEnumerable<Site> filtered = allSites;
+
+            if (allowedSiteIds.Any())
+            {
+                filtered = filtered.Where(s => allowedSiteIds.Contains(s.Id));
+            }
+            else if (identity.ToLower().Contains("devam"))
+            {
+                filtered = filtered.Where(s => (s.Name != null && s.Name.ToLower().Contains("devam")) || (s.Code != null && s.Code.ToLower().Contains("devam")));
+            }
+
+            if (siteId.HasValue)
+            {
+                filtered = filtered.Where(s => s.Id == siteId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                filtered = filtered.Where(s => (s.Name != null && s.Name.Contains(search, StringComparison.OrdinalIgnoreCase)) || (s.Code != null && s.Code.Contains(search, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            var list = filtered.ToList();
+            Response.Headers.Add("X-Total-Count", list.Count.ToString());
+            return Ok(Mapper.Map<List<SiteDto>>(list));
         }
 
         [AllowAnonymous]
@@ -389,17 +424,61 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Warehouse>();
-            var filter = BuildCombinedFilter(siteId, warehouseId);
-            var (items, total) = await repo.GetPagedAsync(
-                page,
-                size,
-                search,
-                filter,
-                null,
-                cancellationToken,
-                x => x.Site);
-            Response.Headers.Add("X-Total-Count", total.ToString());
-            return Ok(Mapper.Map<List<WarehouseDto>>(items));
+            var allWarehouses = await repo.GetFilteredAsync(w => !w.IsDeleted, cancellationToken, x => x.Site);
+
+            var identity = User.Identity?.Name 
+                ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
+                ?? "";
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+
+            var allowedSiteIds = User.Claims
+                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var allowedWhIds = User.Claims
+                .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            IEnumerable<Warehouse> filtered = allWarehouses;
+
+            if (allowedWhIds.Any())
+            {
+                filtered = filtered.Where(w => allowedWhIds.Contains(w.Id));
+            }
+            else if (allowedSiteIds.Any())
+            {
+                filtered = filtered.Where(w => allowedSiteIds.Contains(w.SiteId));
+            }
+            else if (identity.ToLower().Contains("devam"))
+            {
+                filtered = filtered.Where(w => (w.Name != null && w.Name.ToLower().Contains("devam")) || (w.Code != null && w.Code.ToLower().Contains("devam")));
+            }
+
+            if (siteId.HasValue)
+            {
+                filtered = filtered.Where(w => w.SiteId == siteId.Value);
+            }
+            if (warehouseId.HasValue)
+            {
+                filtered = filtered.Where(w => w.Id == warehouseId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                filtered = filtered.Where(w => (w.Name != null && w.Name.Contains(search, StringComparison.OrdinalIgnoreCase)) || (w.Code != null && w.Code.Contains(search, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            var list = filtered.ToList();
+            Response.Headers.Add("X-Total-Count", list.Count.ToString());
+            return Ok(Mapper.Map<List<WarehouseDto>>(list));
         }
 
         [AllowAnonymous]

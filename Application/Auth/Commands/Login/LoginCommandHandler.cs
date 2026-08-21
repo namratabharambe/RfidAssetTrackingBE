@@ -71,12 +71,58 @@ namespace Application.Auth.Commands.Login
             var allSites = await _unitOfWork.Repository<Site>().GetAllAsync(cancellationToken);
             var allWarehouses = await _unitOfWork.Repository<Warehouse>().GetAllAsync(cancellationToken);
 
+            // Parse explicitly assigned Site IDs from user
+            var assignedSiteIds = new HashSet<Guid>();
+            if (!string.IsNullOrWhiteSpace(user.AllowedSiteIds))
+            {
+                foreach (var idStr in user.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (Guid.TryParse(idStr.Trim(), out var g)) assignedSiteIds.Add(g);
+                }
+            }
+            if (user.SiteId.HasValue) assignedSiteIds.Add(user.SiteId.Value);
+
+            // Parse explicitly assigned Warehouse IDs from user
+            var assignedWhIds = new HashSet<Guid>();
+            if (!string.IsNullOrWhiteSpace(user.AllowedWarehouseIds))
+            {
+                foreach (var idStr in user.AllowedWarehouseIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (Guid.TryParse(idStr.Trim(), out var g)) assignedWhIds.Add(g);
+                }
+            }
+
+            var identityLower = (user.Username + " " + user.Email).ToLower();
+            var isSuperAdmin = user.UserRoles.Any(ur => ur.Role.Name == "Super Admin" || ur.Role.Name == "System Administrator");
+
             List<Site> userAllowedSites;
             List<Warehouse> userAllowedWarehouses;
 
-            var identityLower = (user.Username + " " + user.Email).ToLower();
+            if (isSuperAdmin && !assignedSiteIds.Any() && !identityLower.Contains("devam"))
+            {
+                userAllowedSites = allSites.ToList();
+                userAllowedWarehouses = allWarehouses.ToList();
+            }
+            else if (assignedSiteIds.Any() || assignedWhIds.Any())
+            {
+                userAllowedSites = allSites.Where(s => assignedSiteIds.Contains(s.Id)).ToList();
+                if (!userAllowedSites.Any() && user.SiteId.HasValue)
+                {
+                    var s = allSites.FirstOrDefault(x => x.Id == user.SiteId.Value);
+                    if (s != null) userAllowedSites.Add(s);
+                }
 
-            if (identityLower.Contains("devam"))
+                if (assignedWhIds.Any())
+                {
+                    userAllowedWarehouses = allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList();
+                }
+                else
+                {
+                    var validSiteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
+                    userAllowedWarehouses = allWarehouses.Where(w => validSiteIds.Contains(w.SiteId)).ToList();
+                }
+            }
+            else if (identityLower.Contains("devam"))
             {
                 userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
                 var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
@@ -84,8 +130,16 @@ namespace Application.Auth.Commands.Login
             }
             else
             {
-                userAllowedSites = allSites.ToList();
-                userAllowedWarehouses = allWarehouses.ToList();
+                if (user.SiteId.HasValue)
+                {
+                    userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
+                    userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList();
+                }
+                else
+                {
+                    userAllowedSites = allSites.ToList();
+                    userAllowedWarehouses = allWarehouses.ToList();
+                }
             }
 
             if (!user.SiteId.HasValue && userAllowedSites.Any())
@@ -93,15 +147,7 @@ namespace Application.Auth.Commands.Login
                 user.SiteId = userAllowedSites.First().Id;
             }
 
-            var singleSiteContextList = user.SiteId.HasValue
-                ? userAllowedSites.Where(s => s.Id == user.SiteId.Value).ToList()
-                : userAllowedSites;
-
-            var singleWhContextList = user.SiteId.HasValue
-                ? userAllowedWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList()
-                : userAllowedWarehouses;
-
-            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, singleSiteContextList, singleWhContextList);
+            var token = _authService.GenerateJwtToken(user, secretKey, issuer, audience, expiresMinutes, userAllowedSites, userAllowedWarehouses);
             
             var refreshToken = await _authService.GenerateRefreshTokenAsync(user.Id, request.RemoteIpAddress, cancellationToken);
 

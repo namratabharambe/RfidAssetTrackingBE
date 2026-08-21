@@ -43,22 +43,31 @@ namespace Infrastructure.Services
             };
 
             // 1. Site Access Claims
+            var sitesList = allowedSites?.ToList() ?? new List<Site>();
+            if (user.SiteId.HasValue && !sitesList.Any(s => s.Id == user.SiteId.Value))
+            {
+                if (user.Site != null) sitesList.Add(user.Site);
+            }
+
             if (user.SiteId.HasValue)
             {
                 claims.Add(new Claim("siteId", user.SiteId.Value.ToString()));
-                claims.Add(new Claim("sites", user.SiteId.Value.ToString()));
             }
-            else
+
+            foreach (var site in sitesList)
             {
-                var sitesList = allowedSites?.ToList() ?? new List<Site>();
-                if (user.Site != null && !sitesList.Any(s => s.Id == user.Site.Id))
+                claims.Add(new Claim("sites", site.Id.ToString()));
+                claims.Add(new Claim("allowed_site_ids", site.Id.ToString()));
+            }
+
+            if (sitesList.Any())
+            {
+                claims.Add(new Claim("allowed_site_ids_csv", string.Join(",", sitesList.Select(s => s.Id))));
+                try
                 {
-                    sitesList.Add(user.Site);
+                    claims.Add(new Claim("sites_json", System.Text.Json.JsonSerializer.Serialize(sitesList.Select(s => new { Id = s.Id, Name = s.Name, Code = s.Code }))));
                 }
-                foreach (var site in sitesList)
-                {
-                    claims.Add(new Claim("sites", site.Id.ToString()));
-                }
+                catch { }
             }
 
             // 2. Role Access Claims
@@ -88,22 +97,25 @@ namespace Infrastructure.Services
 
             // 3. Warehouse Access Claims
             var warehousesList = allowedWarehouses?.ToList() ?? new List<Warehouse>();
-            if (user.SiteId.HasValue)
-            {
-                warehousesList = warehousesList.Where(w => w.SiteId == user.SiteId.Value).ToList();
-            }
-
             if (activeWarehouseId.HasValue)
             {
                 claims.Add(new Claim("warehouseId", activeWarehouseId.Value.ToString()));
-                claims.Add(new Claim("warehouses", activeWarehouseId.Value.ToString()));
             }
-            else if (warehousesList.Any())
+
+            foreach (var wh in warehousesList)
             {
-                foreach (var wh in warehousesList)
+                claims.Add(new Claim("warehouses", wh.Id.ToString()));
+                claims.Add(new Claim("allowed_warehouse_ids", wh.Id.ToString()));
+            }
+
+            if (warehousesList.Any())
+            {
+                claims.Add(new Claim("allowed_warehouse_ids_csv", string.Join(",", warehousesList.Select(w => w.Id))));
+                try
                 {
-                    claims.Add(new Claim("warehouses", wh.Id.ToString()));
+                    claims.Add(new Claim("warehouses_json", System.Text.Json.JsonSerializer.Serialize(warehousesList.Select(w => new { Id = w.Id, Name = w.Name, Code = w.Code, SiteId = w.SiteId }))));
                 }
+                catch { }
             }
 
             var tokenDescriptor = new SecurityTokenDescriptor
