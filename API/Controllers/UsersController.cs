@@ -142,15 +142,24 @@ namespace API.Controllers
             var salt = _authService.GenerateSalt();
             var hash = _authService.HashPassword(createDto.Password, salt);
 
-            var allowedSitesStr = (createDto.AllowedSiteIds != null && createDto.AllowedSiteIds.Any())
-                ? string.Join(",", createDto.AllowedSiteIds)
-                : (createDto.SiteId.HasValue ? createDto.SiteId.Value.ToString() : null);
+            // Gather all assigned Site IDs across all alias properties
+            var allAssignedSiteGuids = new List<Guid>();
+            if (createDto.AllowedSiteIds != null) allAssignedSiteGuids.AddRange(createDto.AllowedSiteIds);
+            if (createDto.SelectedSiteIds != null) allAssignedSiteGuids.AddRange(createDto.SelectedSiteIds);
+            if (createDto.SiteIds != null) allAssignedSiteGuids.AddRange(createDto.SiteIds);
+            if (createDto.SiteId.HasValue && !allAssignedSiteGuids.Contains(createDto.SiteId.Value)) allAssignedSiteGuids.Add(createDto.SiteId.Value);
+            allAssignedSiteGuids = allAssignedSiteGuids.Distinct().ToList();
 
-            var allowedWhsStr = (createDto.AllowedWarehouseIds != null && createDto.AllowedWarehouseIds.Any())
-                ? string.Join(",", createDto.AllowedWarehouseIds)
-                : null;
+            // Gather all assigned Warehouse IDs across all alias properties
+            var allAssignedWhGuids = new List<Guid>();
+            if (createDto.AllowedWarehouseIds != null) allAssignedWhGuids.AddRange(createDto.AllowedWarehouseIds);
+            if (createDto.SelectedWarehouseIds != null) allAssignedWhGuids.AddRange(createDto.SelectedWarehouseIds);
+            if (createDto.WarehouseIds != null) allAssignedWhGuids.AddRange(createDto.WarehouseIds);
+            allAssignedWhGuids = allAssignedWhGuids.Distinct().ToList();
 
-            var primarySiteId = createDto.SiteId ?? (createDto.AllowedSiteIds != null && createDto.AllowedSiteIds.Any() ? createDto.AllowedSiteIds.First() : null);
+            var allowedSitesStr = allAssignedSiteGuids.Any() ? string.Join(",", allAssignedSiteGuids) : null;
+            var allowedWhsStr = allAssignedWhGuids.Any() ? string.Join(",", allAssignedWhGuids) : null;
+            var primarySiteId = createDto.SiteId ?? (allAssignedSiteGuids.Any() ? allAssignedSiteGuids.First() : null);
 
             var user = new User
             {
@@ -230,15 +239,24 @@ namespace API.Controllers
             var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
             if (user == null) return NotFound();
 
-            var allowedSitesStr = (updateDto.AllowedSiteIds != null && updateDto.AllowedSiteIds.Any())
-                ? string.Join(",", updateDto.AllowedSiteIds)
-                : (updateDto.SiteId.HasValue ? updateDto.SiteId.Value.ToString() : user.AllowedSiteIds);
+            // Gather all assigned Site IDs across all alias properties
+            var allAssignedSiteGuids = new List<Guid>();
+            if (updateDto.AllowedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.AllowedSiteIds);
+            if (updateDto.SelectedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SelectedSiteIds);
+            if (updateDto.SiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SiteIds);
+            if (updateDto.SiteId.HasValue && !allAssignedSiteGuids.Contains(updateDto.SiteId.Value)) allAssignedSiteGuids.Add(updateDto.SiteId.Value);
+            allAssignedSiteGuids = allAssignedSiteGuids.Distinct().ToList();
 
-            var allowedWhsStr = (updateDto.AllowedWarehouseIds != null && updateDto.AllowedWarehouseIds.Any())
-                ? string.Join(",", updateDto.AllowedWarehouseIds)
-                : user.AllowedWarehouseIds;
+            // Gather all assigned Warehouse IDs across all alias properties
+            var allAssignedWhGuids = new List<Guid>();
+            if (updateDto.AllowedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.AllowedWarehouseIds);
+            if (updateDto.SelectedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.SelectedWarehouseIds);
+            if (updateDto.WarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.WarehouseIds);
+            allAssignedWhGuids = allAssignedWhGuids.Distinct().ToList();
 
-            var primarySiteId = updateDto.SiteId ?? (updateDto.AllowedSiteIds != null && updateDto.AllowedSiteIds.Any() ? updateDto.AllowedSiteIds.First() : user.SiteId);
+            var allowedSitesStr = allAssignedSiteGuids.Any() ? string.Join(",", allAssignedSiteGuids) : (updateDto.SiteId.HasValue ? updateDto.SiteId.Value.ToString() : user.AllowedSiteIds);
+            var allowedWhsStr = allAssignedWhGuids.Any() ? string.Join(",", allAssignedWhGuids) : user.AllowedWarehouseIds;
+            var primarySiteId = updateDto.SiteId ?? (allAssignedSiteGuids.Any() ? allAssignedSiteGuids.First() : user.SiteId);
 
             user.Username = updateDto.Username;
             user.Email = updateDto.Email;

@@ -62,7 +62,9 @@ namespace Infrastructure.Services
 
             if (sitesList.Any())
             {
-                claims.Add(new Claim("allowed_site_ids_csv", string.Join(",", sitesList.Select(s => s.Id))));
+                var siteCsv = string.Join(",", sitesList.Select(s => s.Id));
+                claims.Add(new Claim("allowed_site_ids_csv", siteCsv));
+                claims.Add(new Claim("sites_csv", siteCsv));
                 try
                 {
                     claims.Add(new Claim("sites_json", System.Text.Json.JsonSerializer.Serialize(sitesList.Select(s => new { Id = s.Id, Name = s.Name, Code = s.Code }))));
@@ -110,7 +112,9 @@ namespace Infrastructure.Services
 
             if (warehousesList.Any())
             {
-                claims.Add(new Claim("allowed_warehouse_ids_csv", string.Join(",", warehousesList.Select(w => w.Id))));
+                var whCsv = string.Join(",", warehousesList.Select(w => w.Id));
+                claims.Add(new Claim("allowed_warehouse_ids_csv", whCsv));
+                claims.Add(new Claim("warehouses_csv", whCsv));
                 try
                 {
                     claims.Add(new Claim("warehouses_json", System.Text.Json.JsonSerializer.Serialize(warehousesList.Select(w => new { Id = w.Id, Name = w.Name, Code = w.Code, SiteId = w.SiteId }))));

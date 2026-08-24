@@ -32,8 +32,35 @@ namespace Application.DTOs
             SelectedWarehouseIds = selectedWarehouseIds ?? new();
         }
     }
-    public record CreateUserDto(string Username, string Email, string Password, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null, List<Guid>? AllowedSiteIds = null, List<Guid>? AllowedWarehouseIds = null);
-    public record UpdateUserDto(string Username, string Email, bool IsActive, List<Guid>? RoleIds = null, Guid? SiteId = null, List<string>? Roles = null, string? Role = null, List<Guid>? AllowedSiteIds = null, List<Guid>? AllowedWarehouseIds = null);
+    public record CreateUserDto(
+        string Username, 
+        string Email, 
+        string Password, 
+        List<Guid>? RoleIds = null, 
+        Guid? SiteId = null, 
+        List<string>? Roles = null, 
+        string? Role = null, 
+        List<Guid>? AllowedSiteIds = null, 
+        List<Guid>? AllowedWarehouseIds = null,
+        List<Guid>? SelectedSiteIds = null,
+        List<Guid>? SelectedWarehouseIds = null,
+        List<Guid>? SiteIds = null,
+        List<Guid>? WarehouseIds = null);
+
+    public record UpdateUserDto(
+        string Username, 
+        string Email, 
+        bool IsActive, 
+        List<Guid>? RoleIds = null, 
+        Guid? SiteId = null, 
+        List<string>? Roles = null, 
+        string? Role = null, 
+        List<Guid>? AllowedSiteIds = null, 
+        List<Guid>? AllowedWarehouseIds = null,
+        List<Guid>? SelectedSiteIds = null,
+        List<Guid>? SelectedWarehouseIds = null,
+        List<Guid>? SiteIds = null,
+        List<Guid>? WarehouseIds = null);
     public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
     public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null);
