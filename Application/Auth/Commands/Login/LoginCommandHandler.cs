@@ -98,47 +98,57 @@ namespace Application.Auth.Commands.Login
             List<Site> userAllowedSites;
             List<Warehouse> userAllowedWarehouses;
 
-            if (isSuperAdmin && !assignedSiteIds.Any() && !identityLower.Contains("devam"))
+            if (isSuperAdmin && !assignedSiteIds.Any() && !assignedWhIds.Any() && !identityLower.Contains("devam"))
             {
                 userAllowedSites = allSites.ToList();
                 userAllowedWarehouses = allWarehouses.ToList();
             }
             else if (assignedSiteIds.Any() || assignedWhIds.Any())
             {
-                userAllowedSites = allSites.Where(s => assignedSiteIds.Contains(s.Id)).ToList();
+                userAllowedSites = assignedSiteIds.Any()
+                    ? allSites.Where(s => assignedSiteIds.Contains(s.Id)).ToList()
+                    : new List<Site>();
+
                 if (!userAllowedSites.Any() && user.SiteId.HasValue)
                 {
                     var s = allSites.FirstOrDefault(x => x.Id == user.SiteId.Value);
                     if (s != null) userAllowedSites.Add(s);
                 }
 
+                // STRICT: Include ONLY warehouses that were explicitly assigned to this user!
                 if (assignedWhIds.Any())
                 {
                     userAllowedWarehouses = allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList();
                 }
                 else
                 {
-                    var validSiteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
-                    userAllowedWarehouses = allWarehouses.Where(w => validSiteIds.Contains(w.SiteId)).ToList();
+                    // No warehouse assigned -> STRICT empty warehouse list
+                    userAllowedWarehouses = new List<Warehouse>();
                 }
             }
             else if (identityLower.Contains("devam"))
             {
                 userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
                 var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
-                userAllowedWarehouses = allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
+                userAllowedWarehouses = assignedWhIds.Any()
+                    ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
+                    : allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
             }
             else
             {
                 if (user.SiteId.HasValue)
                 {
                     userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
-                    userAllowedWarehouses = allWarehouses.Where(w => w.SiteId == user.SiteId.Value).ToList();
+                    userAllowedWarehouses = assignedWhIds.Any()
+                        ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
+                        : new List<Warehouse>();
                 }
                 else
                 {
                     userAllowedSites = allSites.ToList();
-                    userAllowedWarehouses = allWarehouses.ToList();
+                    userAllowedWarehouses = assignedWhIds.Any()
+                        ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
+                        : new List<Warehouse>();
                 }
             }
 
