@@ -18,10 +18,9 @@ namespace Infrastructure.Persistence.Configurations
 
             builder.Property(x => x.AssetNumber)
                 .HasMaxLength(100)
-                .IsRequired();
+                .IsRequired(false);
 
-            builder.HasIndex(x => x.AssetNumber)
-                .IsUnique();
+            builder.HasIndex(x => x.AssetNumber);
 
             builder.Property(x => x.Name)
                 .HasMaxLength(200)

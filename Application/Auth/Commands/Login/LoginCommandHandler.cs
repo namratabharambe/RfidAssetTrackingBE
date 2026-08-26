@@ -93,7 +93,7 @@ namespace Application.Auth.Commands.Login
             }
 
             var identityLower = (user.Username + " " + user.Email).ToLower();
-            var isSuperAdmin = user.UserRoles.Any(ur => ur.Role.Name == "Super Admin" || ur.Role.Name == "System Administrator");
+            var isSuperAdmin = user.UserRoles.Any(ur => ur.Role != null && (ur.Role.Name == "Super Admin" || ur.Role.Name == "System Administrator"));
 
             List<Site> userAllowedSites;
             List<Warehouse> userAllowedWarehouses;
@@ -120,19 +120,21 @@ namespace Application.Auth.Commands.Login
                 {
                     userAllowedWarehouses = allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList();
                 }
+                else if (isSuperAdmin)
+                {
+                    userAllowedWarehouses = allWarehouses.ToList();
+                }
                 else
                 {
-                    // No warehouse assigned -> STRICT empty warehouse list
                     userAllowedWarehouses = new List<Warehouse>();
                 }
             }
             else if (identityLower.Contains("devam"))
             {
                 userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
-                var siteIds = userAllowedSites.Select(s => s.Id).ToHashSet();
                 userAllowedWarehouses = assignedWhIds.Any()
                     ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
-                    : allWarehouses.Where(w => siteIds.Contains(w.SiteId) || w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
+                    : allWarehouses.Where(w => w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
             }
             else
             {
@@ -141,14 +143,12 @@ namespace Application.Auth.Commands.Login
                     userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
                     userAllowedWarehouses = assignedWhIds.Any()
                         ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
-                        : new List<Warehouse>();
+                        : (isSuperAdmin ? allWarehouses.ToList() : new List<Warehouse>());
                 }
                 else
                 {
-                    userAllowedSites = allSites.ToList();
-                    userAllowedWarehouses = assignedWhIds.Any()
-                        ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
-                        : new List<Warehouse>();
+                    userAllowedSites = isSuperAdmin ? allSites.ToList() : new List<Site>();
+                    userAllowedWarehouses = isSuperAdmin ? allWarehouses.ToList() : new List<Warehouse>();
                 }
             }
 
@@ -168,7 +168,7 @@ namespace Application.Auth.Commands.Login
             var permissionsList = user.UserRoles.SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code)).Distinct().ToList();
 
             var allowedSiteDtos = userAllowedSites.Select(s => new SiteDto(s.Id, s.Code, s.Name, s.Address)).ToList();
-            var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address, w.SiteId, userAllowedSites.FirstOrDefault(s => s.Id == w.SiteId)?.Name ?? "")).ToList();
+            var allowedWarehouseDtos = userAllowedWarehouses.Select(w => new WarehouseDto(w.Id, w.Code, w.Name, w.Address)).ToList();
 
             var activeSiteName = userAllowedSites.FirstOrDefault(s => s.Id == user.SiteId)?.Name ?? user.Site?.Name;
             var userDto = new UserDto(user.Id, user.Username, user.Email, user.IsActive, user.SiteId, activeSiteName, rolesList, permissionsList, allowedSiteDtos, allowedWarehouseDtos);

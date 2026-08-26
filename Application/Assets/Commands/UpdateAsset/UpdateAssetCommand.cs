@@ -9,7 +9,7 @@ namespace Application.Assets.Commands.UpdateAsset
 
     public sealed record UpdateAssetCommand(
         Guid Id,
-        string AssetNumber,
+        string? AssetNumber,
         string Name,
         Guid AssetCategoryId,
         string? Description,

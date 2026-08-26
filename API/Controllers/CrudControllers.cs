@@ -34,24 +34,110 @@ namespace API.Controllers
         {
             get
             {
+                if (Request.Headers.TryGetValue("X-Site-Id", out var hVal) && Guid.TryParse(hVal.FirstOrDefault(), out var hGuid) && hGuid != Guid.Empty)
+                    return hGuid;
+
                 var claim = User.Claims
                     .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                     .Select(c => c.Value)
-                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                    .FirstOrDefault(v => Guid.TryParse(v, out var g) && g != Guid.Empty);
                 return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
+        protected Guid? CurrentUserWarehouseId
+        {
+            get
+            {
+                if (Request.Headers.TryGetValue("X-Warehouse-Id", out var hVal) && Guid.TryParse(hVal.FirstOrDefault(), out var hGuid) && hGuid != Guid.Empty)
+                    return hGuid;
+
+                var claim = User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out var g) && g != Guid.Empty);
+                return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
+        protected bool IsSuperAdmin
+        {
+            get
+            {
+                return User.IsInRole("Super Admin") || 
+                       User.IsInRole("System Administrator") || 
+                       User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && 
+                                            (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
+            }
+        }
+
+        protected Guid? CurrentUserId
+        {
+            get
+            {
+                var claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                         ?? User.FindFirst("sub")?.Value;
+                return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
+        protected List<Guid> AllowedSiteIds
+        {
+            get
+            {
+                var guids = new HashSet<Guid>();
+                foreach (var claim in User.Claims.Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids" || c.Type == "allowed_site_ids_csv"))
+                {
+                    foreach (var part in claim.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (Guid.TryParse(part.Trim(), out var g) && g != Guid.Empty)
+                            guids.Add(g);
+                    }
+                }
+                return guids.ToList();
+            }
+        }
+
+        protected List<Guid> AllowedWarehouseIds
+        {
+            get
+            {
+                var guids = new HashSet<Guid>();
+                foreach (var claim in User.Claims.Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids" || c.Type == "allowed_warehouse_ids_csv"))
+                {
+                    foreach (var part in claim.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (Guid.TryParse(part.Trim(), out var g) && g != Guid.Empty)
+                            guids.Add(g);
+                    }
+                }
+                return guids.ToList();
             }
         }
 
         protected Expression<Func<TEntity, bool>>? BuildCombinedFilter(Guid? querySiteId = null, Guid? queryWarehouseId = null)
         {
+            var targetWhId = queryWarehouseId ?? CurrentUserWarehouseId;
             var targetSiteId = querySiteId ?? CurrentUserSiteId;
-            var targetWhId = queryWarehouseId;
 
             List<Expression> predicates = new();
             var parameter = Expression.Parameter(typeof(TEntity), "e");
 
-            // 1. SiteId Filter
-            if (targetSiteId.HasValue)
+            // 1. WarehouseId Filter (Takes precedence if in Warehouse context)
+            if (targetWhId.HasValue)
+            {
+                var whProp = typeof(TEntity).GetProperty("WarehouseId");
+                if (whProp != null)
+                {
+                    Expression left = Expression.Property(parameter, whProp);
+                    Expression right = whProp.PropertyType == typeof(Guid?) 
+                        ? Expression.Constant(targetWhId, typeof(Guid?)) 
+                        : Expression.Constant(targetWhId.Value, typeof(Guid));
+                    predicates.Add(Expression.Equal(left, right));
+                }
+            }
+            // 2. SiteId Filter (Applies when Site context active)
+            else if (targetSiteId.HasValue)
             {
                 var siteProp = typeof(TEntity).GetProperty("SiteId");
                 if (siteProp != null)
@@ -63,18 +149,47 @@ namespace API.Controllers
                     predicates.Add(Expression.Equal(left, right));
                 }
             }
-
-            // 2. WarehouseId Filter
-            if (targetWhId.HasValue)
+            else if (!IsSuperAdmin)
             {
+                // In Global context without a specific site/warehouse selected, filter by user's allowed sites/warehouses or user's own records
+                var allowedWhs = AllowedWarehouseIds;
+                var allowedSites = AllowedSiteIds;
                 var whProp = typeof(TEntity).GetProperty("WarehouseId");
-                if (whProp != null)
+                var siteProp = typeof(TEntity).GetProperty("SiteId");
+
+                if (allowedWhs.Any() && whProp != null)
                 {
-                    Expression left = Expression.Property(parameter, whProp);
-                    Expression right = whProp.PropertyType == typeof(Guid?) 
-                        ? Expression.Constant(targetWhId, typeof(Guid?)) 
-                        : Expression.Constant(targetWhId.Value, typeof(Guid));
-                    predicates.Add(Expression.Equal(left, right));
+                    var containsMethod = typeof(List<Guid>).GetMethod("Contains", new[] { typeof(Guid) })!;
+                    if (whProp.PropertyType == typeof(Guid?))
+                    {
+                        var whVal = Expression.Property(parameter, whProp);
+                        var hasValue = Expression.Property(whVal, "HasValue");
+                        var value = Expression.Property(whVal, "Value");
+                        var inList = Expression.Call(Expression.Constant(allowedWhs), containsMethod, value);
+                        predicates.Add(Expression.AndAlso(hasValue, inList));
+                    }
+                    else if (whProp.PropertyType == typeof(Guid))
+                    {
+                        var inList = Expression.Call(Expression.Constant(allowedWhs), containsMethod, Expression.Property(parameter, whProp));
+                        predicates.Add(inList);
+                    }
+                }
+                else if (allowedSites.Any() && siteProp != null)
+                {
+                    var containsMethod = typeof(List<Guid>).GetMethod("Contains", new[] { typeof(Guid) })!;
+                    if (siteProp.PropertyType == typeof(Guid?))
+                    {
+                        var siteVal = Expression.Property(parameter, siteProp);
+                        var hasValue = Expression.Property(siteVal, "HasValue");
+                        var value = Expression.Property(siteVal, "Value");
+                        var inList = Expression.Call(Expression.Constant(allowedSites), containsMethod, value);
+                        predicates.Add(Expression.AndAlso(hasValue, inList));
+                    }
+                    else if (siteProp.PropertyType == typeof(Guid))
+                    {
+                        var inList = Expression.Call(Expression.Constant(allowedSites), containsMethod, Expression.Property(parameter, siteProp));
+                        predicates.Add(inList);
+                    }
                 }
             }
 
@@ -94,23 +209,46 @@ namespace API.Controllers
             return BuildCombinedFilter();
         }
 
-        protected bool EnforceSiteRestriction(TEntity entity)
+        protected bool EnforceContextRestriction(TEntity entity)
         {
-            var siteId = CurrentUserSiteId;
-            if (!siteId.HasValue) return true;
+            if (IsSuperAdmin && !CurrentUserWarehouseId.HasValue && !CurrentUserSiteId.HasValue) return true;
 
-            var property = typeof(TEntity).GetProperty("SiteId");
-            if (property == null) return true;
-
-            var entitySiteId = property.GetValue(entity);
-            if (entitySiteId == null) return true;
-
-            Guid? entitySiteGuid = entitySiteId as Guid?;
-            if (entitySiteGuid == null && entitySiteId is Guid g) entitySiteGuid = g;
-
-            if (entitySiteGuid.HasValue && entitySiteGuid.Value != siteId.Value)
+            var whId = CurrentUserWarehouseId;
+            if (whId.HasValue)
             {
-                return false;
+                var whProperty = typeof(TEntity).GetProperty("WarehouseId");
+                if (whProperty != null)
+                {
+                    var entityWhId = whProperty.GetValue(entity);
+                    if (entityWhId != null)
+                    {
+                        Guid? entityWhGuid = entityWhId as Guid?;
+                        if (entityWhGuid == null && entityWhId is Guid g) entityWhGuid = g;
+                        if (entityWhGuid.HasValue && entityWhGuid.Value != whId.Value)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            var siteId = CurrentUserSiteId;
+            if (siteId.HasValue && !whId.HasValue)
+            {
+                var property = typeof(TEntity).GetProperty("SiteId");
+                if (property != null)
+                {
+                    var entitySiteId = property.GetValue(entity);
+                    if (entitySiteId != null)
+                    {
+                        Guid? entitySiteGuid = entitySiteId as Guid?;
+                        if (entitySiteGuid == null && entitySiteId is Guid g) entitySiteGuid = g;
+                        if (entitySiteGuid.HasValue && entitySiteGuid.Value != siteId.Value)
+                        {
+                            return false;
+                        }
+                    }
+                }
             }
 
             return true;
@@ -138,7 +276,7 @@ namespace API.Controllers
             var entity = await UnitOfWork.Repository<TEntity>().GetByIdAsync(id, cancellationToken);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -151,19 +289,32 @@ namespace API.Controllers
         {
             var entity = Mapper.Map<TEntity>(createDto);
 
+            var whId = CurrentUserWarehouseId;
+            if (whId.HasValue)
+            {
+                var whProp = typeof(TEntity).GetProperty("WarehouseId");
+                if (whProp != null)
+                {
+                    var currentVal = whProp.GetValue(entity);
+                    if (currentVal == null || (currentVal is Guid g && g == Guid.Empty))
+                    {
+                        if (whProp.PropertyType == typeof(Guid?)) whProp.SetValue(entity, whId);
+                        else whProp.SetValue(entity, whId.Value);
+                    }
+                }
+            }
+
             var siteId = CurrentUserSiteId;
-            if (siteId.HasValue)
+            if (siteId.HasValue && !whId.HasValue)
             {
                 var property = typeof(TEntity).GetProperty("SiteId");
                 if (property != null)
                 {
-                    if (property.PropertyType == typeof(Guid?))
+                    var currentVal = property.GetValue(entity);
+                    if (currentVal == null || (currentVal is Guid g && g == Guid.Empty))
                     {
-                        property.SetValue(entity, siteId);
-                    }
-                    else
-                    {
-                        property.SetValue(entity, siteId.Value);
+                        if (property.PropertyType == typeof(Guid?)) property.SetValue(entity, siteId);
+                        else property.SetValue(entity, siteId.Value);
                     }
                 }
             }
@@ -180,26 +331,39 @@ namespace API.Controllers
             var entity = await repo.GetByIdAsync(id, cancellationToken);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
 
             Mapper.Map(updateDto, entity);
 
+            var whId = CurrentUserWarehouseId;
+            if (whId.HasValue)
+            {
+                var whProp = typeof(TEntity).GetProperty("WarehouseId");
+                if (whProp != null)
+                {
+                    var currentVal = whProp.GetValue(entity);
+                    if (currentVal == null || (currentVal is Guid g && g == Guid.Empty))
+                    {
+                        if (whProp.PropertyType == typeof(Guid?)) whProp.SetValue(entity, whId);
+                        else whProp.SetValue(entity, whId.Value);
+                    }
+                }
+            }
+
             var siteId = CurrentUserSiteId;
-            if (siteId.HasValue)
+            if (siteId.HasValue && !whId.HasValue)
             {
                 var property = typeof(TEntity).GetProperty("SiteId");
                 if (property != null)
                 {
-                    if (property.PropertyType == typeof(Guid?))
+                    var currentVal = property.GetValue(entity);
+                    if (currentVal == null || (currentVal is Guid g && g == Guid.Empty))
                     {
-                        property.SetValue(entity, siteId);
-                    }
-                    else
-                    {
-                        property.SetValue(entity, siteId.Value);
+                        if (property.PropertyType == typeof(Guid?)) property.SetValue(entity, siteId);
+                        else property.SetValue(entity, siteId.Value);
                     }
                 }
             }
@@ -216,7 +380,7 @@ namespace API.Controllers
             var entity = await repo.GetByIdAsync(id, cancellationToken);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -236,7 +400,6 @@ namespace API.Controllers
     {
         public RolesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<RoleDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -264,7 +427,6 @@ namespace API.Controllers
             return Ok(dtos);
         }
 
-        [AllowAnonymous]
         [HttpGet("{id:guid}")]
         public override async Task<ActionResult<RoleDto>> GetById(Guid id, CancellationToken cancellationToken)
         {
@@ -328,7 +490,6 @@ namespace API.Controllers
     {
         public SitesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<SiteDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -341,18 +502,25 @@ namespace API.Controllers
             var repo = UnitOfWork.Repository<Site>();
             var allSites = await repo.GetAllAsync(cancellationToken);
 
-            var identity = User.Identity?.Name 
-                ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
-                ?? "";
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+            var userEmail = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "email")?.Value ?? "";
+            var userName = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == "unique_name" || c.Type == "username")?.Value ?? User.Identity?.Name ?? "";
+            var identityLower = (userName + " " + userEmail).ToLower();
+            var isDevamUser = identityLower.Contains("devam");
+
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
 
             var allowedSiteIds = User.Claims
                 .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                 .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                .Where(g => g.HasValue)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
                 .Select(g => g!.Value)
                 .Distinct()
                 .ToHashSet();
+
+            if (Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                allowedSiteIds.Add(parsedHSite);
+            }
 
             IEnumerable<Site> filtered = allSites;
 
@@ -360,9 +528,9 @@ namespace API.Controllers
             {
                 filtered = filtered.Where(s => allowedSiteIds.Contains(s.Id));
             }
-            else if (identity.ToLower().Contains("devam"))
+            else if (!isSuperAdmin)
             {
-                filtered = filtered.Where(s => (s.Name != null && s.Name.ToLower().Contains("devam")) || (s.Code != null && s.Code.ToLower().Contains("devam")));
+                filtered = new List<Site>();
             }
 
             if (siteId.HasValue)
@@ -380,7 +548,6 @@ namespace API.Controllers
             return Ok(Mapper.Map<List<SiteDto>>(list));
         }
 
-        [AllowAnonymous]
         [HttpPost]
         public override async Task<ActionResult<SiteDto>> Create([FromBody] CreateSiteDto createDto, CancellationToken cancellationToken = default)
         {
@@ -413,7 +580,6 @@ namespace API.Controllers
     {
         public WarehousesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<WarehouseDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -424,17 +590,14 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Warehouse>();
-            var allWarehouses = await repo.GetFilteredAsync(w => !w.IsDeleted, cancellationToken, x => x.Site);
+            var allWarehouses = await repo.GetFilteredAsync(w => !w.IsDeleted, cancellationToken);
 
-            var identity = User.Identity?.Name 
-                ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
-                ?? "";
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
 
             var allowedSiteIds = User.Claims
                 .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                 .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                .Where(g => g.HasValue)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
                 .Select(g => g!.Value)
                 .Distinct()
                 .ToHashSet();
@@ -442,10 +605,20 @@ namespace API.Controllers
             var allowedWhIds = User.Claims
                 .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
                 .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                .Where(g => g.HasValue)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
                 .Select(g => g!.Value)
                 .Distinct()
                 .ToHashSet();
+
+            // Header overrides
+            if (Request.Headers.TryGetValue("X-Warehouse-Id", out var hWh) && Guid.TryParse(hWh.FirstOrDefault(), out var parsedHWh) && parsedHWh != Guid.Empty)
+            {
+                allowedWhIds.Add(parsedHWh);
+            }
+            if (Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                allowedSiteIds.Add(parsedHSite);
+            }
 
             IEnumerable<Warehouse> filtered = allWarehouses;
 
@@ -453,19 +626,11 @@ namespace API.Controllers
             {
                 filtered = filtered.Where(w => allowedWhIds.Contains(w.Id));
             }
-            else if (allowedSiteIds.Any())
+            else if (!isSuperAdmin)
             {
-                filtered = filtered.Where(w => allowedSiteIds.Contains(w.SiteId));
-            }
-            else if (identity.ToLower().Contains("devam"))
-            {
-                filtered = filtered.Where(w => (w.Name != null && w.Name.ToLower().Contains("devam")) || (w.Code != null && w.Code.ToLower().Contains("devam")));
+                filtered = new List<Warehouse>();
             }
 
-            if (siteId.HasValue)
-            {
-                filtered = filtered.Where(w => w.SiteId == siteId.Value);
-            }
             if (warehouseId.HasValue)
             {
                 filtered = filtered.Where(w => w.Id == warehouseId.Value);
@@ -481,7 +646,6 @@ namespace API.Controllers
             return Ok(Mapper.Map<List<WarehouseDto>>(list));
         }
 
-        [AllowAnonymous]
         [HttpPost]
         public override async Task<ActionResult<WarehouseDto>> Create([FromBody] CreateWarehouseDto createDto, CancellationToken cancellationToken = default)
         {
@@ -498,8 +662,7 @@ namespace API.Controllers
             {
                 Code = code,
                 Name = createDto.Name,
-                Address = createDto.Address,
-                SiteId = createDto.SiteId
+                Address = createDto.Address
             };
 
             await repo.AddAsync(entity, cancellationToken);
@@ -512,11 +675,10 @@ namespace API.Controllers
         {
             var entity = await UnitOfWork.Repository<Warehouse>().GetByIdAsync(
                 id,
-                cancellationToken,
-                x => x.Site);
+                cancellationToken);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -564,7 +726,7 @@ namespace API.Controllers
                 x => x.Warehouse);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -628,7 +790,7 @@ namespace API.Controllers
                 .FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted, cancellationToken);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -684,7 +846,6 @@ namespace API.Controllers
     {
         public GPSDevicesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<GPSDeviceDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -719,7 +880,6 @@ namespace API.Controllers
     {
         public AssetAssignmentsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<AssetAssignmentDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -729,17 +889,28 @@ namespace API.Controllers
             [FromQuery] Guid? warehouseId = null,
             CancellationToken cancellationToken = default)
         {
+            var targetSiteId = siteId ?? CurrentUserSiteId;
+            var targetWhId = warehouseId ?? CurrentUserWarehouseId;
+
             var repo = UnitOfWork.Repository<AssetAssignment>();
-            var filter = BuildCombinedFilter(siteId, warehouseId);
             var (items, total) = await repo.GetPagedAsync(
                 page,
                 size,
                 search,
-                filter,
+                null,
                 null,
                 cancellationToken,
                 x => x.Asset,
                 x => x.AssignedToUser);
+
+            if (targetWhId.HasValue)
+            {
+                items = items.Where(x => x.Asset != null && x.Asset.WarehouseId == targetWhId.Value).ToList();
+            }
+            else if (targetSiteId.HasValue)
+            {
+                items = items.Where(x => x.Asset != null && x.Asset.SiteId == targetSiteId.Value).ToList();
+            }
 
             var dtos = Mapper.Map<List<AssetAssignmentDto>>(items);
 
@@ -756,6 +927,15 @@ namespace API.Controllers
                 m => m.HandheldDevice,
                 m => m.DestinationLocation,
                 m => m.SourceLocation);
+
+            if (targetWhId.HasValue)
+            {
+                movements = movements.Where(m => m.Asset != null && m.Asset.WarehouseId == targetWhId.Value).ToList();
+            }
+            else if (targetSiteId.HasValue)
+            {
+                movements = movements.Where(m => m.Asset != null && m.Asset.SiteId == targetSiteId.Value).ToList();
+            }
 
             foreach (var m in movements.OrderByDescending(x => x.MovementDate))
             {
@@ -813,7 +993,7 @@ namespace API.Controllers
                 x => x.AssignedToUser);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -873,7 +1053,7 @@ namespace API.Controllers
                 x => x.ApprovedByUser);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -889,7 +1069,6 @@ namespace API.Controllers
     {
         public AssetMovementsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<AssetMovementDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -930,7 +1109,7 @@ namespace API.Controllers
                 x => x.HandheldDevice);
             if (entity == null) return NotFound();
 
-            if (!EnforceSiteRestriction(entity))
+            if (!EnforceContextRestriction(entity))
             {
                 return NotFound();
             }
@@ -956,7 +1135,6 @@ namespace API.Controllers
     {
         public AlertsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<AlertDto>>> GetAll(
             [FromQuery] int page = 1,
@@ -989,7 +1167,6 @@ namespace API.Controllers
     {
         public ScanSessionsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
 
-        [AllowAnonymous]
         [HttpGet]
         public override async Task<ActionResult<IEnumerable<ScanSessionDto>>> GetAll(
             [FromQuery] int page = 1,

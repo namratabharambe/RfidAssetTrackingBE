@@ -1,5 +1,6 @@
 using Domain.Entities;
 using Infrastructure.Persistence.Context;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -11,6 +12,7 @@ using System.Threading.Tasks;
 
 namespace API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class GpsController : ControllerBase
@@ -289,6 +291,7 @@ namespace API.Controllers
             public string PostUrl { get; set; }
         }
 
+        [AllowAnonymous]
         [HttpPost("receive")]
         public async Task<IActionResult> ReceiveGps(
             [FromQuery] string id,

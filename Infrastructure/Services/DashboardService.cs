@@ -34,7 +34,7 @@ namespace Infrastructure.Services
             }
             if (warehouseId.HasValue)
             {
-                assetsQuery = assetsQuery.Where(x => x.WarehouseId == warehouseId.Value || x.WarehouseId == null);
+                assetsQuery = assetsQuery.Where(x => x.WarehouseId == warehouseId.Value);
             }
 
             var assets = await assetsQuery.ToListAsync(cancellationToken);
@@ -51,7 +51,7 @@ namespace Infrastructure.Services
             {
                 sitesQuery = sitesQuery.Where(x => x.Id == siteId.Value);
             }
-            var sites = await sitesQuery.Include(x => x.Warehouses).ToListAsync(cancellationToken);
+            var sites = await sitesQuery.ToListAsync(cancellationToken);
 
             var today = DateTime.UtcNow.Date;
             var siteStats = new List<SiteStatDto>();

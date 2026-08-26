@@ -36,12 +36,17 @@ namespace API.Controllers
             var targetSiteName = siteName ?? site;
 
             Guid? targetSiteId = siteId;
+            if (!targetSiteId.HasValue && Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                targetSiteId = parsedHSite;
+            }
+
             if (!targetSiteId.HasValue && string.IsNullOrEmpty(targetSiteName) && HttpContext.User.Identity?.IsAuthenticated == true)
             {
                 var siteClaim = HttpContext.User.Claims
                     .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                     .Select(c => c.Value)
-                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                    .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
                 if (Guid.TryParse(siteClaim, out var g)) targetSiteId = g;
             }
 

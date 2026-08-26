@@ -30,7 +30,7 @@ namespace Infrastructure.Services
             return Convert.ToBase64String(bytes);
         }
 
-        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes, IEnumerable<Site>? allowedSites = null, IEnumerable<Warehouse>? allowedWarehouses = null, Guid? activeWarehouseId = null)
+        public string GenerateJwtToken(User user, string secretKey, string issuer, string audience, int expiresMinutes, IEnumerable<Site>? allowedSites = null, IEnumerable<Warehouse>? allowedWarehouses = null, Guid? activeWarehouseId = null, string? activeRole = null)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.ASCII.GetBytes(secretKey);
@@ -52,6 +52,7 @@ namespace Infrastructure.Services
             if (user.SiteId.HasValue)
             {
                 claims.Add(new Claim("siteId", user.SiteId.Value.ToString()));
+                claims.Add(new Claim("site_id", user.SiteId.Value.ToString()));
             }
 
             foreach (var site in sitesList)
@@ -86,15 +87,31 @@ namespace Infrastructure.Services
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(activeRole))
+            {
+                claims.Add(new Claim("role", activeRole));
+                claims.Add(new Claim("active_role", activeRole));
+                if (!roleNames.Contains(activeRole))
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, activeRole));
+                    roleNames.Add(activeRole);
+                }
+            }
+
             if (!roleNames.Any())
             {
                 var defaultRole = user.SiteId.HasValue ? "Site Admin" : "Super Admin";
                 claims.Add(new Claim(ClaimTypes.Role, defaultRole));
                 claims.Add(new Claim("roles", defaultRole));
+                claims.Add(new Claim("role", defaultRole));
             }
             else
             {
                 claims.Add(new Claim("roles", string.Join(",", roleNames)));
+                if (string.IsNullOrWhiteSpace(activeRole))
+                {
+                    claims.Add(new Claim("role", roleNames.First()));
+                }
             }
 
             // 3. Warehouse Access Claims
@@ -115,11 +132,7 @@ namespace Infrastructure.Services
                 var whCsv = string.Join(",", warehousesList.Select(w => w.Id));
                 claims.Add(new Claim("allowed_warehouse_ids_csv", whCsv));
                 claims.Add(new Claim("warehouses_csv", whCsv));
-                try
-                {
-                    claims.Add(new Claim("warehouses_json", System.Text.Json.JsonSerializer.Serialize(warehousesList.Select(w => new { Id = w.Id, Name = w.Name, Code = w.Code, SiteId = w.SiteId }))));
-                }
-                catch { }
+                    claims.Add(new Claim("warehouses_json", System.Text.Json.JsonSerializer.Serialize(warehousesList.Select(w => new { Id = w.Id, Name = w.Name, Code = w.Code }))));
             }
 
             var tokenDescriptor = new SecurityTokenDescriptor

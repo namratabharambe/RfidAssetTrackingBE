@@ -6,18 +6,18 @@ namespace Application.DTOs
     // Security & Auth DTOs
     public record UserDto
     {
-        public Guid Id { get; init; }
-        public string Username { get; init; } = string.Empty;
-        public string Email { get; init; } = string.Empty;
-        public bool IsActive { get; init; }
-        public Guid? SiteId { get; init; }
-        public string? SiteName { get; init; }
-        public List<string> Roles { get; init; } = new();
-        public List<string> Permissions { get; init; } = new();
-        public List<SiteDto> AllowedSites { get; init; } = new();
-        public List<WarehouseDto> AllowedWarehouses { get; init; } = new();
-        public List<Guid> SelectedSiteIds { get; init; } = new();
-        public List<Guid> SelectedWarehouseIds { get; init; } = new();
+        public Guid Id { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public Guid? SiteId { get; set; }
+        public string? SiteName { get; set; }
+        public List<string> Roles { get; set; } = new();
+        public List<string> Permissions { get; set; } = new();
+        public List<SiteDto> AllowedSites { get; set; } = new();
+        public List<WarehouseDto> AllowedWarehouses { get; set; } = new();
+        public List<Guid> SelectedSiteIds { get; set; } = new();
+        public List<Guid> SelectedWarehouseIds { get; set; } = new();
         public string Status => IsActive ? "Active" : "Inactive";
 
         public UserDto() { }
@@ -63,7 +63,7 @@ namespace Application.DTOs
         List<Guid>? WarehouseIds = null);
     public record LoginDto(string? Username, string Password, string? Email = null);
     public record LoginResponseDto(string Token, string RefreshToken, UserDto User);
-    public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null);
+    public record SwitchContextDto(Guid? SiteId = null, Guid? WarehouseId = null, string? Role = null);
     public record RefreshTokenDto(string Token, string RefreshToken);
     public record ForgotPasswordDto(string Email);
     public record ResetPasswordDto(string Token, string NewPassword);
@@ -101,13 +101,13 @@ namespace Application.DTOs
     }
 
     // Physical Structure DTOs
-    public record SiteDto(Guid Id, string Code, string Name, string? Address);
+    public record SiteDto(Guid Id, string Code, string Name, string? Address, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateSiteDto(string Code, string Name, string? Address);
 
-    public record WarehouseDto(Guid Id, string Code, string Name, string? Address, Guid SiteId, string SiteName);
-    public record CreateWarehouseDto(string Code, string Name, string? Address, Guid SiteId);
+    public record WarehouseDto(Guid Id, string Code, string Name, string? Address, Guid? SiteId = null, string? SiteName = null, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
+    public record CreateWarehouseDto(string Code, string Name, string? Address, Guid? SiteId = null);
 
-    public record ZoneDto(Guid Id, string Code, string Name, string? Description, Guid WarehouseId, string WarehouseName);
+    public record ZoneDto(Guid Id, string Code, string Name, string? Description, Guid WarehouseId, string WarehouseName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateZoneDto(string Code, string Name, string? Description, Guid WarehouseId);
 
     public record LocationDto
@@ -120,34 +120,38 @@ namespace Application.DTOs
         public string? WarehouseName { get; init; }
         public decimal? Latitude { get; init; }
         public decimal? Longitude { get; init; }
+        public string? CreatedBy { get; init; }
+        public DateTime? CreatedOn { get; init; }
+        public string? UpdatedBy { get; init; }
+        public DateTime? UpdatedOn { get; init; }
     }
     public record CreateLocationDto(string Code, string Name, Guid ZoneId, decimal? Latitude, decimal? Longitude);
 
     // Asset Traceability DTOs
-    public record ManufacturerDto(Guid Id, string Name, string? ContactInfo, string? SupportEmail, string? SupportPhone);
+    public record ManufacturerDto(Guid Id, string Name, string? ContactInfo, string? SupportEmail, string? SupportPhone, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateManufacturerDto(string Name, string? ContactInfo, string? SupportEmail, string? SupportPhone);
 
-    public record VendorDto(Guid Id, string Name, string? ContactName, string? Email, string? Phone, string? Address);
+    public record VendorDto(Guid Id, string Name, string? ContactName, string? Email, string? Phone, string? Address, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateVendorDto(string Name, string? ContactName, string? Email, string? Phone, string? Address);
 
-    public record AssetCategoryDto(Guid Id, string Name, string? Description);
+    public record AssetCategoryDto(Guid Id, string Name, string? Description, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateAssetCategoryDto(string Name, string? Description);
 
     // Tags & GPS DTOs
-    public record RFIDTagDto(Guid Id, string EpcCode, string? TidCode, string Status, Guid? AssetId, string? AssetName);
+    public record RFIDTagDto(Guid Id, string EpcCode, string? TidCode, string Status, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateRFIDTagDto(string EpcCode, string? TidCode, Guid? AssetId);
 
-    public record BarcodeDto(Guid Id, string BarcodeValue, string Format, bool IsActive, Guid? AssetId, string? AssetName);
+    public record BarcodeDto(Guid Id, string BarcodeValue, string Format, bool IsActive, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateBarcodeDto(string BarcodeValue, string Format, Guid? AssetId);
 
-    public record GPSDeviceDto(Guid Id, string Imei, string? SimNumber, int BatteryLevel, string Status, Guid? AssetId, string? AssetName);
+    public record GPSDeviceDto(Guid Id, string Imei, string? SimNumber, int BatteryLevel, string Status, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateGPSDeviceDto(string Imei, string? SimNumber, Guid? AssetId);
 
     public record GPSHistoryDto(Guid Id, Guid GPSDeviceId, string Imei, double Latitude, double Longitude, double Speed, double Heading, DateTime Timestamp, string? GeofenceStatus);
     public record PostGPSLocationDto(string Imei, double Latitude, double Longitude, double Speed, double Heading, DateTime Timestamp);
 
     // Hardware DTOs
-    public record ReaderDto(Guid Id, string Name, string IpAddress, int Port, string Status, int AntennaCount, int PowerDbm, string? Model, Guid SiteId, string SiteName);
+    public record ReaderDto(Guid Id, string Name, string IpAddress, int Port, string Status, int AntennaCount, int PowerDbm, string? Model, Guid SiteId, string SiteName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateReaderDto(string Name, string IpAddress, int Port, int AntennaCount, int PowerDbm, Guid SiteId, string? Model = null, string? Status = null);
 
     public record HandheldDeviceDto
@@ -159,6 +163,10 @@ namespace Application.DTOs
         public string Status { get; init; } = null!;
         public Guid? AssignedUserId { get; init; }
         public string? AssignedUsername { get; init; }
+        public string? CreatedBy { get; init; }
+        public DateTime? CreatedOn { get; init; }
+        public string? UpdatedBy { get; init; }
+        public DateTime? UpdatedOn { get; init; }
     }
     public record CreateHandheldDeviceDto(string Name, string DeviceSerial, string? Model, Guid? AssignedUserId);
 
@@ -168,7 +176,7 @@ namespace Application.DTOs
         public Guid Id { get; init; }
         public Guid AssetId { get; init; }
         public string AssetName { get; init; } = null!;
-        public string AssetNumber { get; init; } = null!;
+        public string? AssetNumber { get; init; }
         public Guid AssignedToUserId { get; init; }
         public string AssignedToUsername { get; init; } = null!;
         public string? CustodianName { get; init; }
@@ -178,6 +186,10 @@ namespace Application.DTOs
         public string? Purpose { get; init; }
         public string Status { get; init; } = null!;
         public string? Notes { get; init; }
+        public string? CreatedBy { get; init; }
+        public DateTime? CreatedOn { get; init; }
+        public string? UpdatedBy { get; init; }
+        public DateTime? UpdatedOn { get; init; }
     }
     public record CreateAssetAssignmentDto(Guid AssetId, Guid AssignedToUserId, string? CustodianName, DateTime? ExpectedReturnDate, string? Purpose, string? Notes);
 
@@ -185,7 +197,7 @@ namespace Application.DTOs
         Guid Id,
         Guid AssetId,
         string AssetName,
-        string AssetNumber,
+        string? AssetNumber,
         string? ItemName,
         Guid SourceSiteId,
         string SourceSiteName,
@@ -271,7 +283,7 @@ namespace Application.DTOs
         public Guid Id { get; init; }
         public string IssueCode { get; init; } = string.Empty;
         public Guid AssetId { get; init; }
-        public string AssetNumber { get; init; } = string.Empty;
+        public string? AssetNumber { get; init; }
         public string AssetName { get; init; } = string.Empty;
         public string IssuedToPerson { get; init; } = string.Empty;
         public string Contractor { get; init; } = string.Empty;
@@ -295,7 +307,7 @@ namespace Application.DTOs
         public Guid Id { get; set; }
         public Guid AssetId { get; set; }
         public string AssetName { get; set; } = null!;
-        public string AssetNumber { get; set; } = null!;
+        public string? AssetNumber { get; set; }
         public Guid? SourceLocationId { get; set; }
         public string? SourceLocationName { get; set; }
         public Guid? DestinationLocationId { get; set; }
@@ -328,7 +340,7 @@ namespace Application.DTOs
         public Guid InventoryAuditId { get; init; }
         public Guid AssetId { get; init; }
         public string AssetName { get; init; } = null!;
-        public string AssetNumber { get; init; } = null!;
+        public string? AssetNumber { get; init; }
         public Guid? ExpectedLocationId { get; init; }
         public string? ExpectedLocationName { get; init; }
         public Guid? ScannedLocationId { get; init; }

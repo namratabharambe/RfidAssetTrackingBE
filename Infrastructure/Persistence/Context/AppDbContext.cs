@@ -6,8 +6,10 @@ namespace AssetTracking.Rfid.Infrastructure.Persistence
 {
     public class AppDbContext : AssetTrackingDbContext
     {
-        public AppDbContext(DbContextOptions<AssetTrackingDbContext> options)
-            : base(options)
+        public AppDbContext(
+            DbContextOptions<AssetTrackingDbContext> options,
+            Application.Interfaces.ICurrentUserService? currentUserService = null)
+            : base(options, currentUserService)
         {
         }
 

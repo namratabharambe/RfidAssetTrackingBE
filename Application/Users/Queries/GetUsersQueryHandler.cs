@@ -25,40 +25,11 @@ namespace Application.Users.Queries
         public async Task<IEnumerable<UserDto>> Handle(GetUsersQuery request, CancellationToken cancellationToken)
         {
             var identityLower = (request.CurrentUserIdentity ?? "").Trim().ToLower();
-            bool isDevamContext = identityLower.Contains("devam");
-
             Guid? effectiveSiteId = request.SiteId;
-
-            if (!effectiveSiteId.HasValue && request.WarehouseId.HasValue)
-            {
-                var warehouse = await _unitOfWork.Repository<Warehouse>().GetByIdAsync(request.WarehouseId.Value, cancellationToken);
-                if (warehouse != null)
-                {
-                    effectiveSiteId = warehouse.SiteId;
-                }
-            }
 
             List<User> users;
 
-            if (isDevamContext)
-            {
-                // Isolate Devam tenant: return only users associated with Devam
-                var devamSites = await _unitOfWork.Repository<Site>().GetFilteredAsync(
-                    s => !s.IsDeleted && (s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")),
-                    cancellationToken
-                );
-                var devamSiteIds = devamSites.Select(s => (Guid?)s.Id).ToList();
-
-                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
-                    u => !u.IsDeleted && (
-                        (u.SiteId.HasValue && devamSiteIds.Contains(u.SiteId)) ||
-                        u.Username.ToLower().Contains("devam") ||
-                        u.Email.ToLower().Contains("devam")
-                    ),
-                    cancellationToken
-                );
-            }
-            else if (request.AllowedSiteIds != null && request.AllowedSiteIds.Any() && !request.IsSuperAdmin)
+            if (request.AllowedSiteIds != null && request.AllowedSiteIds.Any() && !request.IsSuperAdmin)
             {
                 var allowedIds = request.AllowedSiteIds.Select(id => (Guid?)id).ToList();
                 var allowedIdStrings = request.AllowedSiteIds.Select(id => id.ToString().ToLower()).ToList();
@@ -115,7 +86,58 @@ namespace Application.Users.Queries
                 }
             }
 
-            return _mapper.Map<List<UserDto>>(users);
+            var allSites = (await _unitOfWork.Repository<Site>().GetFilteredAsync(s => !s.IsDeleted, cancellationToken)).ToList();
+            var allWhs = (await _unitOfWork.Repository<Warehouse>().GetFilteredAsync(w => !w.IsDeleted, cancellationToken)).ToList();
+
+            var userDtos = _mapper.Map<List<UserDto>>(users);
+
+            for (int i = 0; i < users.Count; i++)
+            {
+                var user = users[i];
+                var dto = userDtos[i];
+
+                // 1. Resolve all assigned site IDs (AllowedSiteIds string + SiteId)
+                var siteIdList = new List<Guid>();
+                if (!string.IsNullOrWhiteSpace(user.AllowedSiteIds))
+                {
+                    foreach (var part in user.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (Guid.TryParse(part.Trim(), out var g) && !siteIdList.Contains(g))
+                            siteIdList.Add(g);
+                    }
+                }
+                if (user.SiteId.HasValue && !siteIdList.Contains(user.SiteId.Value))
+                {
+                    siteIdList.Add(user.SiteId.Value);
+                }
+
+                // 2. Map full SiteDto objects with Name and Code
+                var matchedSites = allSites.Where(s => siteIdList.Contains(s.Id)).Select(s => _mapper.Map<SiteDto>(s)).ToList();
+                dto.AllowedSites = matchedSites;
+                dto.SelectedSiteIds = siteIdList;
+
+                if (string.IsNullOrWhiteSpace(dto.SiteName))
+                {
+                    var primarySiteName = allSites.FirstOrDefault(s => s.Id == user.SiteId)?.Name ?? matchedSites.FirstOrDefault()?.Name;
+                    if (!string.IsNullOrWhiteSpace(primarySiteName)) dto.SiteName = primarySiteName;
+                }
+
+                // 3. Resolve all assigned warehouse IDs (AllowedWarehouseIds string)
+                var whIdList = new List<Guid>();
+                if (!string.IsNullOrWhiteSpace(user.AllowedWarehouseIds))
+                {
+                    foreach (var part in user.AllowedWarehouseIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (Guid.TryParse(part.Trim(), out var g) && !whIdList.Contains(g))
+                            whIdList.Add(g);
+                    }
+                }
+                var matchedWhs = allWhs.Where(w => whIdList.Contains(w.Id)).Select(w => _mapper.Map<WarehouseDto>(w)).ToList();
+                dto.AllowedWarehouses = matchedWhs;
+                dto.SelectedWarehouseIds = whIdList;
+            }
+
+            return userDtos;
         }
     }
 }

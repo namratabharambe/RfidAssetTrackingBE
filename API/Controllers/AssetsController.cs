@@ -4,10 +4,12 @@ using Application.Assets.Commands.UpdateAsset;
 using Application.Assets.Queries;
 using Application.DTOs;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/assets")]
     public class AssetsController : ControllerBase
@@ -26,49 +28,85 @@ namespace API.Controllers
             [FromQuery] int? page = null,
             [FromQuery] int? size = null)
         {
+            // Resolve warehouse ID from query, header, or claims
+            Guid? targetWhId = warehouseId;
+            if (!targetWhId.HasValue && Request.Headers.TryGetValue("X-Warehouse-Id", out var hWh) && Guid.TryParse(hWh.FirstOrDefault(), out var parsedHWh) && parsedHWh != Guid.Empty)
+            {
+                targetWhId = parsedHWh;
+            }
+
+            // Resolve site ID from query, header, or claims
+            Guid? targetSiteId = siteId;
+            if (!targetSiteId.HasValue && Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                targetSiteId = parsedHSite;
+            }
+
             var assets = await _mediator.Send(new GetAssetsQuery());
 
             // Check authenticated user claims
             if (HttpContext.User.Identity?.IsAuthenticated == true)
             {
                 var isGlobalSuperAdmin = HttpContext.User.IsInRole("Super Admin") 
+                                      || HttpContext.User.IsInRole("System Administrator")
                                       || HttpContext.User.HasClaim(c => c.Type == "allowed_site_ids" && c.Value == "ALL")
                                       || HttpContext.User.HasClaim(c => c.Type == "sites" && c.Value == "GLOBAL_ALL_SITES");
 
-                // Extract site ID assigned to user in token claim ('siteId', 'sites', 'site_id', 'allowed_site_ids')
-                var tokenSiteGuid = HttpContext.User.Claims
+                var allowedSiteGuids = HttpContext.User.Claims
                     .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                     .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                    .FirstOrDefault(g => g.HasValue);
+                    .Where(g => g.HasValue && g.Value != Guid.Empty)
+                    .Select(g => g!.Value)
+                    .Distinct()
+                    .ToHashSet();
 
-                // Extract warehouse ID assigned to user in token claim ('warehouseId', 'warehouses', 'warehouse_id')
-                var tokenWhGuid = HttpContext.User.Claims
-                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id")
+                var allowedWhGuids = HttpContext.User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
                     .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                    .FirstOrDefault(g => g.HasValue);
+                    .Where(g => g.HasValue && g.Value != Guid.Empty)
+                    .Select(g => g!.Value)
+                    .Distinct()
+                    .ToHashSet();
 
-                // Strict Site/Warehouse Scoping: Direct query parameter or token claim
-                var targetSite = siteId ?? tokenSiteGuid;
-                var targetWh = warehouseId ?? tokenWhGuid;
-
-                if (targetWh.HasValue)
+                if (!targetWhId.HasValue && allowedWhGuids.Count == 1)
                 {
-                    assets = assets.Where(a => a.WarehouseId == targetWh.Value);
+                    targetWhId = allowedWhGuids.First();
                 }
-                else if (targetSite.HasValue)
+
+                if (!targetSiteId.HasValue && !targetWhId.HasValue && allowedSiteGuids.Count == 1)
                 {
-                    assets = assets.Where(a => a.SiteId == targetSite.Value);
+                    targetSiteId = allowedSiteGuids.First();
+                }
+
+                if (targetWhId.HasValue)
+                {
+                    assets = assets.Where(a => a.WarehouseId == targetWhId.Value);
+                }
+                else if (targetSiteId.HasValue)
+                {
+                    assets = assets.Where(a => a.SiteId == targetSiteId.Value);
+                }
+                else if (!isGlobalSuperAdmin)
+                {
+                    if (allowedWhGuids.Any())
+                    {
+                        assets = assets.Where(a => a.WarehouseId.HasValue && allowedWhGuids.Contains(a.WarehouseId.Value));
+                    }
+                    else if (allowedSiteGuids.Any())
+                    {
+                        assets = assets.Where(a => a.SiteId.HasValue && allowedSiteGuids.Contains(a.SiteId.Value));
+                    }
                 }
             }
             else
             {
-                if (siteId.HasValue)
+                if (targetWhId.HasValue)
                 {
-                    assets = assets.Where(a => a.SiteId == siteId.Value);
+                    assets = assets.Where(a => a.WarehouseId == targetWhId.Value);
                 }
-                if (warehouseId.HasValue)
+                else if (targetSiteId.HasValue)
                 {
-                    assets = assets.Where(a => a.WarehouseId == warehouseId.Value);
+                    assets = assets.Where(a => a.SiteId == targetSiteId.Value);
                 }
             }
 
@@ -96,16 +134,79 @@ namespace API.Controllers
         [HttpPost]
         public async Task<Guid> Create([FromBody] CreateAssetCommand command)
         {
-            return await _mediator.Send(command);
+            var finalCommand = command;
+
+            // Resolve context from headers or claims
+            Guid? ctxSiteId = null;
+            Guid? ctxWhId = null;
+
+            if (Request.Headers.TryGetValue("X-Warehouse-Id", out var hWh) && Guid.TryParse(hWh.FirstOrDefault(), out var gWh) && gWh != Guid.Empty)
+                ctxWhId = gWh;
+
+            if (Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var gSite) && gSite != Guid.Empty)
+                ctxSiteId = gSite;
+
+            if (HttpContext.User.Identity?.IsAuthenticated == true)
+            {
+                if (!ctxWhId.HasValue)
+                {
+                    var whClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(whClaim, out var gw)) ctxWhId = gw;
+                }
+
+                if (!ctxSiteId.HasValue)
+                {
+                    var siteClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(siteClaim, out var gs)) ctxSiteId = gs;
+                }
+            }
+
+            if (!finalCommand.WarehouseId.HasValue && ctxWhId.HasValue)
+                finalCommand = finalCommand with { WarehouseId = ctxWhId };
+
+            if (!finalCommand.SiteId.HasValue && ctxSiteId.HasValue && !ctxWhId.HasValue)
+                finalCommand = finalCommand with { SiteId = ctxSiteId };
+
+            return await _mediator.Send(finalCommand);
         }
 
         [HttpPost("bulk")]
         public async Task<IActionResult> BulkCreate([FromBody] IEnumerable<CreateAssetCommand> commands)
         {
             var createdIds = new List<Guid>();
+            Guid? defaultSiteId = null;
+            Guid? defaultWhId = null;
+
+            if (HttpContext.User.Identity?.IsAuthenticated == true)
+            {
+                var siteClaim = HttpContext.User.Claims
+                    .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                if (Guid.TryParse(siteClaim, out var g)) defaultSiteId = g;
+
+                var whClaim = HttpContext.User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                if (Guid.TryParse(whClaim, out var gw)) defaultWhId = gw;
+            }
+
             foreach (var command in commands)
             {
-                var id = await _mediator.Send(command);
+                var finalCommand = command;
+                if (!finalCommand.SiteId.HasValue && defaultSiteId.HasValue)
+                    finalCommand = finalCommand with { SiteId = defaultSiteId };
+                if (!finalCommand.WarehouseId.HasValue && defaultWhId.HasValue)
+                    finalCommand = finalCommand with { WarehouseId = defaultWhId };
+
+                var id = await _mediator.Send(finalCommand);
                 createdIds.Add(id);
             }
             return Ok(new { count = createdIds.Count, ids = createdIds });
@@ -179,22 +280,82 @@ namespace API.Controllers
         [HttpPut("{id:guid}")]
         public async Task<IActionResult> Update(
             Guid id,
-            UpdateAssetCommand command)
+            UpdateAssetCommand command,
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
         {
             if (id != command.Id)
                 return BadRequest();
 
-            await _mediator.Send(command);
+            var existing = await unitOfWork.Repository<Domain.Entities.Asset>().GetByIdAsync(id, cancellationToken);
+            if (existing == null) return NotFound();
 
+            // Validate user context
+            if (HttpContext.User.Identity?.IsAuthenticated == true)
+            {
+                var isSuperAdmin = HttpContext.User.IsInRole("Super Admin") || HttpContext.User.IsInRole("System Administrator");
+                if (!isSuperAdmin)
+                {
+                    var whClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(whClaim, out var ctxWh) && existing.WarehouseId.HasValue && existing.WarehouseId.Value != ctxWh)
+                    {
+                        return NotFound();
+                    }
+
+                    var siteClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(siteClaim, out var ctxSite) && existing.SiteId.HasValue && existing.SiteId.Value != ctxSite)
+                    {
+                        return NotFound();
+                    }
+                }
+            }
+
+            await _mediator.Send(command, cancellationToken);
             return NoContent();
         }
 
         [HttpDelete("{id:guid}")]
-        public async Task<IActionResult> Delete(Guid id)
+        public async Task<IActionResult> Delete(
+            Guid id,
+            [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
+            CancellationToken cancellationToken)
         {
-            await _mediator.Send(
-                new DeleteAssetCommand(id));
+            var existing = await unitOfWork.Repository<Domain.Entities.Asset>().GetByIdAsync(id, cancellationToken);
+            if (existing == null) return NotFound();
 
+            // Validate user context
+            if (HttpContext.User.Identity?.IsAuthenticated == true)
+            {
+                var isSuperAdmin = HttpContext.User.IsInRole("Super Admin") || HttpContext.User.IsInRole("System Administrator");
+                if (!isSuperAdmin)
+                {
+                    var whClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(whClaim, out var ctxWh) && existing.WarehouseId.HasValue && existing.WarehouseId.Value != ctxWh)
+                    {
+                        return NotFound();
+                    }
+
+                    var siteClaim = HttpContext.User.Claims
+                        .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                        .Select(c => c.Value)
+                        .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
+                    if (Guid.TryParse(siteClaim, out var ctxSite) && existing.SiteId.HasValue && existing.SiteId.Value != ctxSite)
+                    {
+                        return NotFound();
+                    }
+                }
+            }
+
+            await _mediator.Send(new DeleteAssetCommand(id), cancellationToken);
             return NoContent();
         }
 
@@ -310,10 +471,9 @@ namespace API.Controllers
             var whRepo = unitOfWork.Repository<Domain.Entities.Warehouse>();
             
             var asset = (await assetRepo.GetFilteredAsync(a => a.AssetNumber == request.assetCode || a.Name == request.assetName || !a.IsDeleted, cancellationToken)).FirstOrDefault();
-            var wh = await whRepo.GetByIdAsync(request.fromWarehouseId, cancellationToken);
             var firstSiteId = (await siteRepo.GetAllAsync(cancellationToken)).First().Id;
 
-            Guid srcSiteId = wh?.SiteId ?? (await siteRepo.GetByIdAsync(request.fromWarehouseId, cancellationToken) != null ? request.fromWarehouseId : firstSiteId);
+            Guid srcSiteId = (await siteRepo.GetByIdAsync(request.fromWarehouseId, cancellationToken)) != null ? request.fromWarehouseId : firstSiteId;
             Guid dstSiteId = (await siteRepo.GetByIdAsync(request.toSiteId, cancellationToken)) != null ? request.toSiteId : firstSiteId;
 
             var userClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -352,11 +512,10 @@ namespace API.Controllers
             var whRepo = unitOfWork.Repository<Domain.Entities.Warehouse>();
 
             var asset = (await assetRepo.GetFilteredAsync(a => a.AssetNumber == request.assetCode || a.Name == request.assetName || !a.IsDeleted, cancellationToken)).FirstOrDefault();
-            var wh = await whRepo.GetByIdAsync(request.toWarehouseId, cancellationToken);
             var firstSiteId = (await siteRepo.GetAllAsync(cancellationToken)).First().Id;
 
             Guid srcSiteId = (await siteRepo.GetByIdAsync(request.fromSiteId, cancellationToken)) != null ? request.fromSiteId : firstSiteId;
-            Guid dstSiteId = wh?.SiteId ?? (await siteRepo.GetByIdAsync(request.toWarehouseId, cancellationToken) != null ? request.toWarehouseId : firstSiteId);
+            Guid dstSiteId = (await siteRepo.GetByIdAsync(request.toWarehouseId, cancellationToken)) != null ? request.toWarehouseId : firstSiteId;
 
             var userClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             Guid currentUserId = Guid.TryParse(userClaim, out var uG) ? uG : (await unitOfWork.Repository<Domain.Entities.User>().GetAllAsync(cancellationToken)).First().Id;

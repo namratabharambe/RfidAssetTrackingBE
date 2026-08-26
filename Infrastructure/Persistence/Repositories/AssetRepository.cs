@@ -1,4 +1,4 @@
-﻿using Application.Interfaces;
+using Application.Interfaces;
 using Domain.Entities;
 using Infrastructure.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +18,11 @@ namespace Infrastructure.Persistence.Repositories
             CancellationToken cancellationToken = default)
         {
             return await _context.Assets
+                .Include(a => a.Site)
+                .Include(a => a.Warehouse)
+                .Include(a => a.Zone)
+                .Include(a => a.Location)
+                .Include(a => a.AssetCategory)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
         }
@@ -27,6 +32,11 @@ namespace Infrastructure.Persistence.Repositories
             CancellationToken cancellationToken = default)
         {
             return await _context.Assets
+                .Include(a => a.Site)
+                .Include(a => a.Warehouse)
+                .Include(a => a.Zone)
+                .Include(a => a.Location)
+                .Include(a => a.AssetCategory)
                 .FirstOrDefaultAsync(
                     x => x.Id == id,
                     cancellationToken);

@@ -80,7 +80,7 @@ namespace Infrastructure.Services
             {
                 rows.Add(new List<string> {
                     a.Id.ToString(),
-                    a.AssetNumber,
+                    a.AssetNumber ?? "—",
                     a.Name,
                     a.Description ?? "",
                     a.SerialNumber ?? "",

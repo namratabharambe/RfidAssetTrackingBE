@@ -20,6 +20,7 @@ using Alert = AssetTracking.Rfid.Domain.Entities.Alert;
 
 namespace API.Controllers
 {
+    [Authorize]
     [ApiController]
     public class LegacyCompatController : ControllerBase
     {
@@ -44,12 +45,37 @@ namespace API.Controllers
 
 
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/sites")]
-        public async Task<IActionResult> GetSites([FromServices] AppDbContext db)
+        public async Task<IActionResult> GetSites([FromServices] AppDbContext db, [FromServices] AssetTrackingDbContext trackingDb)
         {
-            var sites = await db.Sites.ToListAsync();
-            var dropdownItems = sites.Select(s => new
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
+
+            var allowedSiteIds = User.Claims
+                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            if (Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                allowedSiteIds.Add(parsedHSite);
+            }
+
+            var allSites = await trackingDb.Sites.Where(s => !s.IsDeleted).ToListAsync();
+            IEnumerable<Domain.Entities.Site> filtered = allSites;
+
+            if (allowedSiteIds.Any())
+            {
+                filtered = filtered.Where(s => allowedSiteIds.Contains(s.Id));
+            }
+            else if (!isSuperAdmin && User.Identity?.IsAuthenticated == true)
+            {
+                filtered = new List<Domain.Entities.Site>();
+            }
+
+            var dropdownItems = filtered.Select(s => new
             {
                 id = s.Id.ToString(),
                 text = s.Name
@@ -57,32 +83,87 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/admin/users/active-sessions/{userId}")]
         public async Task<IActionResult> GetActiveSessions(string userId, [FromServices] AssetTrackingDbContext db)
         {
-            var sites = await db.Sites.Where(s => !s.IsDeleted).ToListAsync();
-            var activeSites = sites.Select(s => new
+            var allSites = await db.Sites.Where(s => !s.IsDeleted).ToListAsync();
+            Domain.Entities.User? user = null;
+
+            if (Guid.TryParse(userId, out var userGuid))
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => u.Id == userGuid && !u.IsDeleted);
+            }
+            if (user == null)
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => (u.Username.ToLower() == userId.ToLower() || u.Email.ToLower() == userId.ToLower()) && !u.IsDeleted);
+            }
+
+            IEnumerable<Domain.Entities.Site> filtered = allSites;
+
+            if (user != null)
+            {
+                var assignedSiteIds = new HashSet<Guid>();
+                if (!string.IsNullOrWhiteSpace(user.AllowedSiteIds))
+                {
+                    foreach (var idStr in user.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (Guid.TryParse(idStr.Trim(), out var g)) assignedSiteIds.Add(g);
+                    }
+                }
+                if (user.SiteId.HasValue) assignedSiteIds.Add(user.SiteId.Value);
+
+                if (assignedSiteIds.Any())
+                {
+                    filtered = allSites.Where(s => assignedSiteIds.Contains(s.Id));
+                }
+            }
+
+            var activeSites = filtered.Select(s => new
             {
                 siteId = s.Id.ToString(),
                 siteName = s.Name
             }).ToList();
 
-            if (!activeSites.Any())
-            {
-                activeSites.Add(new { siteId = "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91", siteName = "Pune DC" });
-            }
-
             return Ok(activeSites);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/admin/users/active-site/{userId}")]
         public async Task<IActionResult> GetActiveSite(string userId, [FromServices] AssetTrackingDbContext db)
         {
-            var site = await db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
-            var siteId = site?.Id.ToString() ?? "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91";
-            var siteName = site?.Name ?? "Pune DC";
+            Domain.Entities.User? user = null;
+            if (Guid.TryParse(userId, out var userGuid))
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => u.Id == userGuid && !u.IsDeleted);
+            }
+            if (user == null)
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => (u.Username.ToLower() == userId.ToLower() || u.Email.ToLower() == userId.ToLower()) && !u.IsDeleted);
+            }
+
+            Domain.Entities.Site? site = null;
+            if (user != null)
+            {
+                if (user.SiteId.HasValue)
+                {
+                    site = await db.Sites.FirstOrDefaultAsync(s => s.Id == user.SiteId.Value && !s.IsDeleted);
+                }
+                if (site == null && !string.IsNullOrWhiteSpace(user.AllowedSiteIds))
+                {
+                    var firstIdStr = user.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                    if (Guid.TryParse(firstIdStr?.Trim(), out var firstSiteGuid))
+                    {
+                        site = await db.Sites.FirstOrDefaultAsync(s => s.Id == firstSiteGuid && !s.IsDeleted);
+                    }
+                }
+            }
+
+            if (site == null)
+            {
+                site = await db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+            }
+
+            var siteId = site?.Id.ToString() ?? "";
+            var siteName = site?.Name ?? "";
 
             return Ok(new
             {
@@ -91,7 +172,6 @@ namespace API.Controllers
             });
         }
 
-        [AllowAnonymous]
         [HttpGet("api/admin/users/SiteWiseToken/{userId}/{siteId}")]
         public async Task<IActionResult> GetSiteWiseToken(string userId, string siteId)
         {
@@ -102,7 +182,6 @@ namespace API.Controllers
             });
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/trucksDropdown")]
         public async Task<IActionResult> GetTrucksDropdown([FromServices] AppDbContext db)
         {
@@ -115,7 +194,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/drivers")]
         public async Task<IActionResult> GetDrivers([FromServices] AppDbContext db)
         {
@@ -131,7 +209,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/individual")]
         public async Task<IActionResult> GetIndividuals([FromServices] AppDbContext db)
         {
@@ -147,7 +224,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/activedrivers")]
         public async Task<IActionResult> GetActiveDrivers([FromServices] AppDbContext db)
         {
@@ -168,7 +244,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/activeIndividual")]
         public async Task<IActionResult> GetActiveIndividuals([FromServices] AppDbContext db)
         {
@@ -189,7 +264,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/activeTrucksDropdown")]
         public async Task<IActionResult> GetActiveTrucksDropdown([FromServices] AppDbContext db)
         {
@@ -210,7 +284,6 @@ namespace API.Controllers
             return Ok(dropdownItems);
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/check-driver-assignment")]
         public async Task<IActionResult> CheckDriverAssignment([FromQuery] string driverName, [FromServices] AppDbContext db)
         {
@@ -245,7 +318,6 @@ namespace API.Controllers
             return Ok(new { assigned = false, truckNumber = "" });
         }
 
-        [AllowAnonymous]
         [HttpPost("api/Trucks/ImportTruckCsv")]
         public async Task<IActionResult> ImportTruckCsv([FromBody] ImportTruckRequest request, [FromServices] AppDbContext db)
         {
@@ -346,7 +418,6 @@ namespace API.Controllers
             return Ok(new { success = true });
         }
 
-        [AllowAnonymous]
         [HttpPost("api/Trucks/initialize-session")]
         public async Task<IActionResult> InitializeSession([FromBody] InitializeSessionRequest request, [FromServices] AppDbContext db)
         {
@@ -432,7 +503,6 @@ namespace API.Controllers
             return Ok(new { success = true });
         }
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/{truckId:guid}")]
         public async Task<IActionResult> GetTruckDetails(Guid truckId, [FromServices] AppDbContext db)
         {
@@ -464,34 +534,77 @@ namespace API.Controllers
         }
 
 
-        [AllowAnonymous]
         [HttpGet("api/Trucks/complete-status")]
-        public async Task<IActionResult> GetCompleteStatus([FromServices] AppDbContext db)
+        public async Task<IActionResult> GetCompleteStatus(
+            [FromServices] AppDbContext db,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null)
         {
             try
             {
-                // ── Pre-load all readers by direction or name ────────────────────────────
+                Guid? targetSiteId = siteId;
+                Guid? targetWhId = warehouseId;
+
+                if (HttpContext.User?.Identity?.IsAuthenticated == true)
+                {
+                    if (!targetSiteId.HasValue)
+                    {
+                        var claim = HttpContext.User.Claims
+                            .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                            .Select(c => c.Value)
+                            .FirstOrDefault(v => Guid.TryParse(v, out _));
+                        if (Guid.TryParse(claim, out var g)) targetSiteId = g;
+                    }
+                    if (!targetWhId.HasValue)
+                    {
+                        var claim = HttpContext.User.Claims
+                            .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                            .Select(c => c.Value)
+                            .FirstOrDefault(v => Guid.TryParse(v, out _));
+                        if (Guid.TryParse(claim, out var g)) targetWhId = g;
+                    }
+                }
+
+                // ── Pre-load all readers by direction or name for target site ────────────────────────────
                 var exitReaderIds = await db.Readers
-                    .Where(r => (r.Direction != null && r.Direction.ToUpper() == "EXIT") || (r.Name != null && r.Name.ToUpper().Contains("EXIT")))
+                    .Where(r => (!targetSiteId.HasValue || r.SiteId == targetSiteId.Value) &&
+                                ((r.Direction != null && r.Direction.ToUpper() == "EXIT") || (r.Name != null && r.Name.ToUpper().Contains("EXIT"))))
                     .Select(r => r.Id)
                     .ToListAsync();
 
                 var entryReaderIds = await db.Readers
-                    .Where(r => (r.Direction != null && r.Direction.ToUpper() == "ENTRY") || (r.Name != null && r.Name.ToUpper().Contains("ENTRY")))
+                    .Where(r => (!targetSiteId.HasValue || r.SiteId == targetSiteId.Value) &&
+                                ((r.Direction != null && r.Direction.ToUpper() == "ENTRY") || (r.Name != null && r.Name.ToUpper().Contains("ENTRY"))))
                     .Select(r => r.Id)
                     .ToListAsync();
 
                 // ── All EXIT movements (fixed reader checkout) ───────────────────────────
-                var allExitMovements = await db.AssetMovements
+                var exitQuery = db.AssetMovements
                     .Include(m => m.Asset)
-                    .Where(m => (m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value)) || (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKOUT") || m.MovementType.ToUpper().Contains("EXIT")) && m.HandheldDeviceId == null && (m.Remarks == null || !m.Remarks.Contains("Handheld"))))
+                    .Where(m => (m.ReaderId != null && exitReaderIds.Contains(m.ReaderId.Value)) ||
+                                (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKOUT") || m.MovementType.ToUpper().Contains("EXIT")) && m.HandheldDeviceId == null && (m.Remarks == null || !m.Remarks.Contains("Handheld"))));
+
+                if (targetWhId.HasValue)
+                    exitQuery = exitQuery.Where(m => m.Asset != null && m.Asset.WarehouseId == targetWhId.Value);
+                else if (targetSiteId.HasValue)
+                    exitQuery = exitQuery.Where(m => m.Asset != null && m.Asset.SiteId == targetSiteId.Value);
+
+                var allExitMovements = await exitQuery
                     .OrderByDescending(m => m.MovementDate)
                     .ToListAsync();
 
                 // ── All ENTRY movements (checkin) ────────────────────────────────────────
-                var allEntryMovements = await db.AssetMovements
+                var entryQuery = db.AssetMovements
                     .Include(m => m.Asset)
-                    .Where(m => (m.ReaderId != null && entryReaderIds.Contains(m.ReaderId.Value)) || (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKIN") || m.MovementType.ToUpper().Contains("ENTRY"))))
+                    .Where(m => (m.ReaderId != null && entryReaderIds.Contains(m.ReaderId.Value)) ||
+                                (m.MovementType != null && (m.MovementType.ToUpper().Contains("CHECKIN") || m.MovementType.ToUpper().Contains("ENTRY"))));
+
+                if (targetWhId.HasValue)
+                    entryQuery = entryQuery.Where(m => m.Asset != null && m.Asset.WarehouseId == targetWhId.Value);
+                else if (targetSiteId.HasValue)
+                    entryQuery = entryQuery.Where(m => m.Asset != null && m.Asset.SiteId == targetSiteId.Value);
+
+                var allEntryMovements = await entryQuery
                     .OrderByDescending(m => m.MovementDate)
                     .Take(50)
                     .ToListAsync();
@@ -717,9 +830,16 @@ namespace API.Controllers
                 var rObj = r as dynamic;
             }
 
-            var standaloneAssignments = await db.AssetAssignments
+            var standaloneQuery = db.AssetAssignments
                 .Include(a => a.Asset)
-                .Where(a => a.CustodianName != null && a.CustodianName.Length > 0)
+                .Where(a => a.CustodianName != null && a.CustodianName.Length > 0);
+
+            if (targetWhId.HasValue)
+                standaloneQuery = standaloneQuery.Where(a => a.Asset != null && a.Asset.WarehouseId == targetWhId.Value);
+            else if (targetSiteId.HasValue)
+                standaloneQuery = standaloneQuery.Where(a => a.Asset != null && a.Asset.SiteId == targetSiteId.Value);
+
+            var standaloneAssignments = await standaloneQuery
                 .OrderByDescending(a => a.AssignedDate)
                 .Take(200)
                 .ToListAsync();

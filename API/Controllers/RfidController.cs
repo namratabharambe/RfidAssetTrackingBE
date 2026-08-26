@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 
 namespace API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class RfidController : ControllerBase
@@ -254,7 +255,7 @@ namespace API.Controllers
                     Epc = e.Epc,
                     Rssi = e.Rssi,
                     ReaderId = resolvedReaderId,
-                    SiteId = resolvedSiteId ?? "f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91",
+                    SiteId = resolvedSiteId ?? batch.SiteId ?? "",
                     Timestamp = scanTs,
                     type = scanTypeStr,
                     CreatedOn = DateTime.UtcNow
@@ -409,7 +410,6 @@ namespace API.Controllers
             }
         }
 
-        [AllowAnonymous]
         [HttpGet("equipmentnumberbyrfid/{rfidTag}")]
         public async Task<ActionResult> GetEquipmentByRfid(string rfidTag)
         {
@@ -436,7 +436,6 @@ namespace API.Controllers
             });
         }
 
-        [AllowAnonymous]
         [HttpPut("scanInventory")]
         public async Task<ActionResult> ScanInventory(
             [FromBody] ScanInventoryRequestDto request,
@@ -477,35 +476,26 @@ namespace API.Controllers
                 resolvedLocation = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
                     .FirstOrDefaultAsync(l =>
-                        (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId) &&
-                        (l.Name.ToLower() == locQuery.ToLower() ||
-                         l.Code.ToLower() == locQuery.ToLower() ||
-                         l.Name.ToLower().Contains(locQuery.ToLower()) ||
-                         l.Code.ToLower().Contains(locQuery.ToLower())));
+                        l.Name.ToLower() == locQuery.ToLower() ||
+                        l.Code.ToLower() == locQuery.ToLower() ||
+                        l.Name.ToLower().Contains(locQuery.ToLower()) ||
+                        l.Code.ToLower().Contains(locQuery.ToLower()));
 
                 // Auto-create new location if custom location specified from handheld (e.g., "bay 777") is not yet in DB
                 if (resolvedLocation == null && !string.IsNullOrWhiteSpace(locQuery))
                 {
                     var defaultZone = await _db.Zones
                         .Include(z => z.Warehouse)
-                        .FirstOrDefaultAsync(z => siteId == Guid.Empty || z.Warehouse.SiteId == siteId);
+                        .FirstOrDefaultAsync();
 
                     if (defaultZone == null)
                     {
-                        var targetSiteId = siteId;
-                        if (targetSiteId == Guid.Empty)
-                        {
-                            var site = await _db.Sites.FirstOrDefaultAsync();
-                            targetSiteId = site?.Id ?? Guid.NewGuid();
-                        }
-
-                        var warehouse = await _db.Warehouses.FirstOrDefaultAsync(w => w.SiteId == targetSiteId);
+                        var warehouse = await _db.Warehouses.FirstOrDefaultAsync();
                         if (warehouse == null)
                         {
                             warehouse = new Warehouse
                             {
                                 Id = Guid.NewGuid(),
-                                SiteId = targetSiteId,
                                 Name = "Main Warehouse",
                                 Code = "WH-MAIN",
                                 CreatedOn = DateTime.UtcNow
@@ -565,7 +555,7 @@ namespace API.Controllers
             {
                 var locationsWithCoords = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
-                    .Where(l => l.Latitude != null && l.Longitude != null && (siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId))
+                    .Where(l => l.Latitude != null && l.Longitude != null)
                     .ToListAsync();
 
                 Location? closestLocation = null;
@@ -595,12 +585,11 @@ namespace API.Controllers
             {
                 resolvedLocation = await _db.Locations
                     .Include(l => l.Zone).ThenInclude(z => z.Warehouse)
-                    .FirstOrDefaultAsync(l => siteId == Guid.Empty || l.Zone.Warehouse.SiteId == siteId)
-                    ?? await _db.Locations.Include(l => l.Zone).ThenInclude(z => z.Warehouse).FirstOrDefaultAsync();
+                    .FirstOrDefaultAsync();
             }
 
             var resolvedLocationId = resolvedLocation?.Id;
-            var resolvedLocationName = resolvedLocation?.Name ?? "Pune DC Main Warehouse";
+            var resolvedLocationName = resolvedLocation?.Name ?? "Unassigned Location";
 
             // 3. Create or reuse an open scan session for this handheld/site
             var session = await _db.ScanSessions.FirstOrDefaultAsync(s =>
@@ -649,7 +638,7 @@ namespace API.Controllers
                         AssetCategoryId = defaultCatId,
                         Status = Domain.Enums.AssetStatus.Available,
                         LocationId = resolvedLocationId,
-                        SiteId = siteId != Guid.Empty ? siteId : (resolvedLocation?.Zone?.Warehouse?.SiteId ?? Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91")),
+                        SiteId = siteId != Guid.Empty ? siteId : (Guid?)null,
                         CreatedOn = DateTime.UtcNow
                     };
                     _db.Assets.Add(newAsset);
@@ -840,7 +829,6 @@ namespace API.Controllers
             });
         }
 
-        [AllowAnonymous]
         [HttpGet("inventory-scans")]
         public async Task<ActionResult> GetInventoryScannedItems()
         {
@@ -873,7 +861,7 @@ namespace API.Controllers
                         expectedQty = 1,
                         actualQty = asset.Status == Domain.Enums.AssetStatus.Retired ? 0 : 1,
                         unit = "unit",
-                        zone = asset.Site?.Name ?? "Pune DC",
+                        zone = asset.Site?.Name ?? "—",
                         binLocation = latest.DestinationLocation?.Name ?? asset.Location?.Name ?? "Staging Area",
                         status = asset.Status == Domain.Enums.AssetStatus.Retired ? "Missing" : "In Stock",
                         lastAuditTime = latest.MovementDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
@@ -885,7 +873,6 @@ namespace API.Controllers
             return Ok(items);
         }
 
-        [AllowAnonymous]
         [HttpGet("/api/Equipment")]
         public async Task<ActionResult> GetEquipmentList()
         {
@@ -909,9 +896,9 @@ namespace API.Controllers
                     AssetNumber = a.AssetNumber,
                     EquipmentName = a.Name,
                     EquipmentType = a.AssetCategory?.Name ?? "Tools",
-                    location = a.Location?.Name ?? "Pune DC",
+                    location = a.Location?.Name ?? "—",
                     status = a.Status.ToString(),
-                    site = a.Site?.Name ?? "Pune DC",
+                    site = a.Site?.Name ?? "—",
                     barcodeNumber = a.QrCode ?? "—",
                     imageUrl = ""
                 };
@@ -952,15 +939,9 @@ namespace API.Controllers
                 }
 
                 Guid? locationId = null;
-                if (siteGuid != Guid.Empty)
-                {
-                    var location = await _db.Locations.FirstOrDefaultAsync(l => l.Name.ToLower() == "default location" && l.Zone.Warehouse.SiteId == siteGuid);
-                    if (location == null)
-                    {
-                        location = await _db.Locations.FirstOrDefaultAsync(l => l.Zone.Warehouse.SiteId == siteGuid);
-                    }
-                    locationId = location?.Id;
-                }
+                var location = await _db.Locations.FirstOrDefaultAsync(l => l.Name.ToLower() == "default location")
+                    ?? await _db.Locations.FirstOrDefaultAsync();
+                locationId = location?.Id;
 
                 var asset = await _db.Assets.FirstOrDefaultAsync(a => a.AssetNumber == row.AssetNumber);
                 var statusStr = row.status?.ToLower() ?? "";
@@ -1021,7 +1002,6 @@ namespace API.Controllers
             return Ok(new { success = true });
         }
 
-        [AllowAnonymous]
         [HttpGet("readerlist")]
         public async Task<ActionResult> GetReaderList([FromQuery] string siteId, [FromQuery] string? scanMode = null, [FromQuery] string? deviceId = null)
         {

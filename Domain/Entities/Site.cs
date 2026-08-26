@@ -12,7 +12,6 @@ namespace Domain.Entities
         public string? Address { get; set; }
         /// <summary>Warehouse | Manufacturing | DistributionCenter | Hub</summary>
         public string? SiteType { get; set; }
-        public ICollection<Warehouse> Warehouses { get; set; } = new List<Warehouse>();
         public ICollection<User> Users { get; set; } = new List<User>();
     }
 }
