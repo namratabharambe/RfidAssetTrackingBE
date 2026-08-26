@@ -121,8 +121,8 @@ namespace Infrastructure.Services
                                  {
                                      asset.SiteId = reader.SiteId;
                                      
-                                     // Resolve Location under reader's SiteId
-                                     var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == reader.SiteId, stoppingToken, l => l.Zone.Warehouse);
+                                     // Resolve Location under reader
+                                     var locations = await unitOfWork.Repository<Location>().GetAllAsync(stoppingToken);
                                      var firstLoc = locations.FirstOrDefault();
                                      if (firstLoc != null)
                                      {
@@ -386,20 +386,20 @@ namespace Infrastructure.Services
                                                               {
                                                                   // Default to the asset's current location first (so it preserves API updates)
                                                                   scannedLocationId = asset.LocationId;
-                                                                  if (scanEvent.ReaderId != null)
-                                                                  {
-                                                                      var reader = await unitOfWork.Repository<Reader>().GetByIdAsync(scanEvent.ReaderId.Value, stoppingToken);
-                                                                      if (reader != null)
-                                                                      {
-                                                                          asset.SiteId = reader.SiteId;
-                                                                          var locations = await unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == reader.SiteId, stoppingToken, l => l.Zone.Warehouse);
-                                                                          var firstLoc = locations.FirstOrDefault();
-                                                                          if (firstLoc != null)
-                                                                          {
-                                                                              scannedLocationId = firstLoc.Id;
-                                                                          }
-                                                                      }
-                                                                  }
+                                    if (scanEvent.ReaderId != null)
+                                    {
+                                        var reader = await unitOfWork.Repository<Reader>().GetByIdAsync(scanEvent.ReaderId.Value, stoppingToken);
+                                        if (reader != null)
+                                        {
+                                            asset.SiteId = reader.SiteId;
+                                            var locations = await unitOfWork.Repository<Location>().GetAllAsync(stoppingToken);
+                                            var firstLoc = locations.FirstOrDefault();
+                                            if (firstLoc != null)
+                                            {
+                                                scannedLocationId = firstLoc.Id;
+                                            }
+                                        }
+                                    }
 
                                                                   if (scannedLocationId == null)
                                                                   {
@@ -445,11 +445,7 @@ namespace Infrastructure.Services
                              
                                                                   if (scannedLocationId != null)
                                                                   {
-                                                                      var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(scannedLocationId.Value, stoppingToken, l => l.Zone.Warehouse);
-                                                                      if (locWithSite?.Zone?.Warehouse != null)
-                                                                      {
-                                                                          asset.SiteId = locWithSite.Zone.Warehouse.SiteId;
-                                                                      }
+                                                                       var locWithSite = await unitOfWork.Repository<Location>().GetByIdAsync(scannedLocationId.Value, stoppingToken);
                                                                   }
                              
                                                                   // --- HANDHELD ASSIGNMENT LOGIC ---

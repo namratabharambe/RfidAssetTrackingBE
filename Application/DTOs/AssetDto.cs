@@ -4,7 +4,7 @@ namespace Application.DTOs;
 
 public record AssetDto(
     Guid Id,
-    string AssetNumber,
+    string? AssetNumber,
     string Name,
     string? Description,
     string? SerialNumber,
@@ -33,11 +33,24 @@ public record AssetDto(
     string? InvoiceNumber = null,
     DateTime? InvoiceDate = null,
     string? PoNumber = null,
-    string? Image = null
+    string? Image = null,
+    string? SiteName = null,
+    string? WarehouseName = null,
+    string? ZoneName = null,
+    string? CurrentLocation = null,
+    decimal? Quantity = null,
+    decimal? EntryQty = null,
+    decimal? IssuedQty = null,
+    decimal? BalanceQty = null,
+    string? Unit = null,
+    string? CreatedBy = null,
+    DateTime? CreatedOn = null,
+    string? UpdatedBy = null,
+    DateTime? UpdatedOn = null
 );
 
 public record CreateAssetDto(
-    string AssetNumber,
+    string? AssetNumber,
     string Name,
     Guid AssetCategoryId,
     string? Description,
@@ -69,7 +82,7 @@ public record CreateAssetDto(
 );
 
 public record UpdateAssetDto(
-    string AssetNumber,
+    string? AssetNumber,
     string Name,
     Guid AssetCategoryId,
     string? Description,

@@ -7,7 +7,7 @@ using System.Text;
 namespace Application.Assets.Commands.CreateAsset
 {
     public sealed record CreateAssetCommand(
-      string AssetNumber,
+      string? AssetNumber,
       string Name,
       Guid AssetCategoryId,
       string? Description,

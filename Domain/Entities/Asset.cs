@@ -7,7 +7,7 @@ namespace Domain.Entities
 {
     public class Asset : BaseEntity
     {
-        public string AssetNumber { get; set; } = null!;
+        public string? AssetNumber { get; set; }
         public string Name { get; set; } = null!;
         public string? Description { get; set; }
         public string? SerialNumber { get; set; }
@@ -76,7 +76,7 @@ namespace Domain.Entities
         }
 
         public Asset(
-            string assetNumber,
+            string? assetNumber,
             string name,
             Guid assetCategoryId)
         {
@@ -87,7 +87,7 @@ namespace Domain.Entities
         }
 
         public void Update(
-           string assetNumber,
+           string? assetNumber,
            string name,
            Guid assetCategoryId,
            string? description,

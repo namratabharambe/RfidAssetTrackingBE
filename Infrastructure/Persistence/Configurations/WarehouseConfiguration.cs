@@ -25,11 +25,6 @@ namespace Infrastructure.Persistence.Configurations
                 
             builder.Property(x => x.Address)
                 .HasMaxLength(500);
-                
-            builder.HasOne(x => x.Site)
-                .WithMany(x => x.Warehouses)
-                .HasForeignKey(x => x.SiteId)
-                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

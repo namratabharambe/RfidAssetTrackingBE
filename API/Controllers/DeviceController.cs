@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 
 namespace API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/device")]
     public class DeviceController : ControllerBase
@@ -240,7 +241,6 @@ namespace API.Controllers
         }
 
         [HttpGet("sessions")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
         {
             var sessionRepo = _unitOfWork.Repository<ScanSession>();
@@ -269,7 +269,6 @@ namespace API.Controllers
         }
 
         [HttpGet("config")]
-        [AllowAnonymous]
         public IActionResult GetConfig()
         {
             return Ok(new
@@ -282,7 +281,6 @@ namespace API.Controllers
         }
 
         [HttpGet("readers")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetReaders(CancellationToken cancellationToken)
         {
             var readers = await _unitOfWork.Repository<Reader>().GetAllAsync(cancellationToken);
@@ -290,7 +288,6 @@ namespace API.Controllers
         }
 
         [HttpGet("sites")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetSites(CancellationToken cancellationToken)
         {
             var sites = await _unitOfWork.Repository<Site>().GetAllAsync(cancellationToken);

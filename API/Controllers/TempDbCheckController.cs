@@ -7,7 +7,7 @@ using System.Linq;
 
 namespace API.Controllers
 {
-    [AllowAnonymous]
+    [Authorize]
     [ApiController]
     [Route("api/tempcheck")]
     public class TempDbCheckController : ControllerBase

@@ -27,12 +27,14 @@ namespace Application.Audits.Commands.ReconcileAudit
 
             // Resolve SiteId to LocationId if needed to protect foreign key constraints
             Guid? scannedLocationId = request.ScannedLocationId;
+            Guid? resolvedSiteId = null;
             if (scannedLocationId.HasValue)
             {
                 var isSite = await _unitOfWork.Repository<Site>().GetByIdAsync(scannedLocationId.Value, cancellationToken) != null;
                 if (isSite)
                 {
-                    var locations = await _unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Zone.Warehouse.SiteId == scannedLocationId.Value, cancellationToken, l => l.Zone.Warehouse);
+                    resolvedSiteId = scannedLocationId.Value;
+                    var locations = await _unitOfWork.Repository<Location>().GetAllAsync(cancellationToken);
                     var firstLoc = locations.FirstOrDefault();
                     if (firstLoc != null)
                     {
@@ -40,11 +42,11 @@ namespace Application.Audits.Commands.ReconcileAudit
                     }
                     else
                     {
-                        // Create dummy warehouse/zone/location structure for the site to preserve constraint integrity
-                        var firstWarehouse = (await _unitOfWork.Repository<Warehouse>().GetFilteredAsync(w => w.SiteId == scannedLocationId.Value, cancellationToken)).FirstOrDefault();
+                        // Create dummy warehouse/zone/location structure to preserve constraint integrity
+                        var firstWarehouse = (await _unitOfWork.Repository<Warehouse>().GetAllAsync(cancellationToken)).FirstOrDefault();
                         if (firstWarehouse == null)
                         {
-                            firstWarehouse = new Warehouse { Id = Guid.NewGuid(), Code = "WH-AUDIT", Name = "Audit Warehouse", SiteId = scannedLocationId.Value, CreatedOn = DateTime.UtcNow };
+                            firstWarehouse = new Warehouse { Id = Guid.NewGuid(), Code = "WH-AUDIT", Name = "Audit Warehouse", CreatedOn = DateTime.UtcNow };
                             await _unitOfWork.Repository<Warehouse>().AddAsync(firstWarehouse, cancellationToken);
                         }
                         var firstZone = (await _unitOfWork.Repository<Zone>().GetFilteredAsync(z => z.WarehouseId == firstWarehouse.Id, cancellationToken)).FirstOrDefault();
@@ -58,17 +60,6 @@ namespace Application.Audits.Commands.ReconcileAudit
                         await _unitOfWork.SaveChangesAsync(cancellationToken);
                         scannedLocationId = defaultLoc.Id;
                     }
-                }
-            }
-            // Resolve SiteId of the scanned Location to update Asset.SiteId correctly
-            Guid? resolvedSiteId = null;
-            if (scannedLocationId.HasValue)
-            {
-                var locs = await _unitOfWork.Repository<Location>().GetFilteredAsync(l => l.Id == scannedLocationId.Value, cancellationToken, l => l.Zone.Warehouse);
-                var loc = locs.FirstOrDefault();
-                if (loc?.Zone?.Warehouse != null)
-                {
-                    resolvedSiteId = loc.Zone.Warehouse.SiteId;
                 }
             }
 

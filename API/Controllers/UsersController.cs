@@ -56,7 +56,6 @@ namespace API.Controllers
             }
         }
 
-        [AllowAnonymous]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserDto>>> GetAll(
             [FromQuery] Guid? siteId = null,
@@ -66,7 +65,11 @@ namespace API.Controllers
                 ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
                 ?? "";
 
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.Claims.Any(c => c.Type == System.Security.Claims.ClaimTypes.Role && c.Value == "Super Admin");
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("Admin") || User.IsInRole("Administrator") ||
+                User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") &&
+                    (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) ||
+                     c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+                     c.Value.Equals("Administrator", StringComparison.OrdinalIgnoreCase)));
 
             var allowedSiteIds = User.Claims
                 .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
@@ -104,7 +107,35 @@ namespace API.Controllers
                 }
             }
 
-            return Ok(_mapper.Map<UserDto>(user));
+            var dto = _mapper.Map<UserDto>(user);
+            var allSites = (await _unitOfWork.Repository<Site>().GetFilteredAsync(s => !s.IsDeleted, cancellationToken)).ToList();
+            var allWhs = (await _unitOfWork.Repository<Warehouse>().GetFilteredAsync(w => !w.IsDeleted, cancellationToken)).ToList();
+
+            var siteIdList = new List<Guid>();
+            if (!string.IsNullOrWhiteSpace(user.AllowedSiteIds))
+            {
+                foreach (var part in user.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (Guid.TryParse(part.Trim(), out var g) && !siteIdList.Contains(g)) siteIdList.Add(g);
+                }
+            }
+            if (user.SiteId.HasValue && !siteIdList.Contains(user.SiteId.Value)) siteIdList.Add(user.SiteId.Value);
+
+            dto.AllowedSites = allSites.Where(s => siteIdList.Contains(s.Id)).Select(s => _mapper.Map<SiteDto>(s)).ToList();
+            dto.SelectedSiteIds = siteIdList;
+
+            var whIdList = new List<Guid>();
+            if (!string.IsNullOrWhiteSpace(user.AllowedWarehouseIds))
+            {
+                foreach (var part in user.AllowedWarehouseIds.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (Guid.TryParse(part.Trim(), out var g) && !whIdList.Contains(g)) whIdList.Add(g);
+                }
+            }
+            dto.AllowedWarehouses = allWhs.Where(w => whIdList.Contains(w.Id)).Select(w => _mapper.Map<WarehouseDto>(w)).ToList();
+            dto.SelectedWarehouseIds = whIdList;
+
+            return Ok(dto);
         }
 
         [AllowAnonymous]

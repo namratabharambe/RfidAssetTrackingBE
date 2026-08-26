@@ -235,10 +235,10 @@ namespace Infrastructure.Persistence.Context
                 await context.Sites.AddRangeAsync(pune, mumbai, chennai, bengaluru);
                 await context.SaveChangesAsync();
 
-                var puneWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91"), Code = "PUNE-WH-1", Name = "Pune DC Whse", SiteId = pune.Id };
-                var mumbaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c92"), Code = "MUM-WH-1", Name = "Mumbai Whse", SiteId = mumbai.Id };
-                var chennaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c93"), Code = "CHEN-WH-1", Name = "Chennai Whse", SiteId = chennai.Id };
-                var bengaluruWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c94"), Code = "BLR-WH-1", Name = "Bengaluru Whse", SiteId = bengaluru.Id };
+                var puneWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91"), Code = "PUNE-WH-1", Name = "Pune DC Whse" };
+                var mumbaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c92"), Code = "MUM-WH-1", Name = "Mumbai Whse" };
+                var chennaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c93"), Code = "CHEN-WH-1", Name = "Chennai Whse" };
+                var bengaluruWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c94"), Code = "BLR-WH-1", Name = "Bengaluru Whse" };
 
                 await context.Warehouses.AddRangeAsync(puneWh, mumbaiWh, chennaiWh, bengaluruWh);
                 await context.SaveChangesAsync();
@@ -261,7 +261,7 @@ namespace Infrastructure.Persistence.Context
 
             if (!await context.Warehouses.AnyAsync(w => w.Id == devamWhId))
             {
-                await context.Warehouses.AddAsync(new Warehouse { Id = devamWhId, Code = "DEVAM-WH-1", Name = "Devam Central Store Main Warehouse", SiteId = devamAlphaId, Address = "Devam Main Storage" });
+                await context.Warehouses.AddAsync(new Warehouse { Id = devamWhId, Code = "DEVAM-WH-1", Name = "Devam Central Store Main Warehouse", Address = "Devam Main Storage" });
                 await context.SaveChangesAsync();
             }
 

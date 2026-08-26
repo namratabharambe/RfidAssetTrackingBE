@@ -31,10 +31,28 @@ namespace API.Controllers
         {
             get
             {
+                if (Request.Headers.TryGetValue("X-Site-Id", out var hVal) && Guid.TryParse(hVal.FirstOrDefault(), out var hGuid) && hGuid != Guid.Empty)
+                    return hGuid;
+
                 var claim = User.Claims
                     .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
                     .Select(c => c.Value)
-                    .FirstOrDefault(v => Guid.TryParse(v, out _));
+                    .FirstOrDefault(v => Guid.TryParse(v, out var g) && g != Guid.Empty);
+                return Guid.TryParse(claim, out var guid) ? guid : null;
+            }
+        }
+
+        private Guid? CurrentUserWarehouseId
+        {
+            get
+            {
+                if (Request.Headers.TryGetValue("X-Warehouse-Id", out var hVal) && Guid.TryParse(hVal.FirstOrDefault(), out var hGuid) && hGuid != Guid.Empty)
+                    return hGuid;
+
+                var claim = User.Claims
+                    .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                    .Select(c => c.Value)
+                    .FirstOrDefault(v => Guid.TryParse(v, out var g) && g != Guid.Empty);
                 return Guid.TryParse(claim, out var guid) ? guid : null;
             }
         }
@@ -67,6 +85,7 @@ namespace API.Controllers
         [HttpGet("api/assets/issue/report")]
         public async Task<ActionResult<IEnumerable<AssetIssuanceDto>>> GetIssuanceReport(
             [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
             [FromQuery] Guid? assetId = null,
             [FromQuery] string? contractor = null,
             [FromQuery] string? issuedToPerson = null,
@@ -77,6 +96,7 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var targetSiteId = siteId ?? CurrentUserSiteId;
+            var targetWhId = warehouseId ?? CurrentUserWarehouseId;
             var repo = _unitOfWork.Repository<AssetIssuance>();
 
             var (items, total) = await repo.GetPagedAsync(
@@ -85,13 +105,15 @@ namespace API.Controllers
                 null,
                 x => (!x.IsDeleted) &&
                      (!targetSiteId.HasValue || x.SiteId == targetSiteId.Value) &&
+                     (!targetWhId.HasValue || (x.Asset != null && x.Asset.WarehouseId == targetWhId.Value)) &&
                      (!assetId.HasValue || x.AssetId == assetId.Value) &&
                      (string.IsNullOrEmpty(contractor) || x.Contractor.Contains(contractor)) &&
                      (string.IsNullOrEmpty(issuedToPerson) || x.IssuedToPerson.Contains(issuedToPerson)) &&
                      (!fromDate.HasValue || x.IssuedDate >= fromDate.Value) &&
                      (!toDate.HasValue || x.IssuedDate <= toDate.Value),
                 q => q.OrderByDescending(x => x.IssuedDate),
-                cancellationToken);
+                cancellationToken,
+                x => x.Asset);
 
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(_mapper.Map<List<AssetIssuanceDto>>(items));

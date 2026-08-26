@@ -1,13 +1,23 @@
+using Application.Interfaces;
+using Domain.Common;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Infrastructure.Persistence.Context;
 
 public class AssetTrackingDbContext : DbContext
 {
-    public AssetTrackingDbContext(DbContextOptions<AssetTrackingDbContext> options)
+    private readonly ICurrentUserService? _currentUserService;
+
+    public AssetTrackingDbContext(
+        DbContextOptions<AssetTrackingDbContext> options,
+        ICurrentUserService? currentUserService = null)
         : base(options)
     {
+        _currentUserService = currentUserService;
     }
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<AssetCategory> AssetCategories => Set<AssetCategory>();
@@ -85,24 +95,52 @@ public class AssetTrackingDbContext : DbContext
         modelBuilder.Entity<AssetTracking.Rfid.Domain.Entities.MissingEquipmentSeverity>().HasKey(s => s.SeverityId);
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    private void ApplyAuditInformation()
     {
-        var entries = ChangeTracker.Entries<Domain.Common.BaseEntity>();
+        var currentUserIdStr = _currentUserService?.UserId?.ToString()
+                               ?? _currentUserService?.Username
+                               ?? "System";
+        var now = DateTime.UtcNow;
+
+        var entries = ChangeTracker.Entries<BaseEntity>();
         foreach (var entry in entries)
         {
             if (entry.State == EntityState.Added)
             {
                 if (entry.Entity.CreatedOn == default || entry.Entity.CreatedOn.Kind != DateTimeKind.Utc)
                 {
-                    entry.Entity.CreatedOn = DateTime.UtcNow;
+                    entry.Entity.CreatedOn = now;
+                }
+                if (string.IsNullOrWhiteSpace(entry.Entity.CreatedBy))
+                {
+                    entry.Entity.CreatedBy = currentUserIdStr;
                 }
             }
             else if (entry.State == EntityState.Modified)
             {
-                entry.Entity.UpdatedOn = DateTime.UtcNow;
+                entry.Entity.UpdatedOn = now;
+                entry.Entity.UpdatedBy = currentUserIdStr;
+            }
+            else if (entry.State == EntityState.Deleted)
+            {
+                entry.State = EntityState.Modified;
+                entry.Entity.IsDeleted = true;
+                entry.Entity.DeletedOn = now;
+                entry.Entity.DeletedBy = currentUserIdStr;
             }
         }
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        ApplyAuditInformation();
         return base.SaveChangesAsync(cancellationToken);
+    }
+
+    public override int SaveChanges()
+    {
+        ApplyAuditInformation();
+        return base.SaveChanges();
     }
 }
 

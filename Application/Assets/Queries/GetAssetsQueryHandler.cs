@@ -54,7 +54,20 @@ namespace Application.Assets.Queries
                 asset.InvoiceNumber,
                 asset.InvoiceDate,
                 asset.PoNumber,
-                asset.Image
+                asset.Image,
+                asset.Site != null ? asset.Site.Name : null,
+                asset.Warehouse != null ? asset.Warehouse.Name : null,
+                asset.Zone != null ? asset.Zone.Name : null,
+                asset.Location != null ? asset.Location.Name : null,
+                asset.BalanceQty ?? asset.EntryQty ?? 1,
+                asset.EntryQty,
+                asset.IssuedQty,
+                asset.BalanceQty,
+                asset.Unit,
+                asset.CreatedBy,
+                asset.CreatedOn,
+                asset.UpdatedBy,
+                asset.UpdatedOn
             ));
         }
     }
