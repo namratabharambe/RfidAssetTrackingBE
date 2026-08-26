@@ -51,8 +51,7 @@ public class ScanDataProcessorFunction
         {
             if (!Guid.TryParse(group.Key.SiteId, out var siteGuid))
             {
-                var sFallback = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted && s.Name.Contains("Pune")) 
-                    ?? await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+                var sFallback = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
                 if (sFallback != null)
                 {
                     siteGuid = sFallback.Id;

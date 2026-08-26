@@ -224,8 +224,7 @@ namespace API.Controllers
 
             if (string.IsNullOrEmpty(resolvedSiteId) || !Guid.TryParse(resolvedSiteId, out _))
             {
-                var defaultSite = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted && s.Name.Contains("Pune"));
-                defaultSite = defaultSite ?? await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
+                var defaultSite = await _db.Sites.FirstOrDefaultAsync(s => !s.IsDeleted);
                 if (defaultSite != null)
                 {
                     resolvedSiteId = defaultSite.Id.ToString();

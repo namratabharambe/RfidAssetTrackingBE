@@ -227,20 +227,18 @@ namespace Infrastructure.Persistence.Context
 
             if (!await context.Sites.AnyAsync())
             {
-                var pune = new Site { Id = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91"), Code = "PUNE-DC", Name = "Pune DC", Address = "Pune, Maharashtra, India" };
                 var mumbai = new Site { Id = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c92"), Code = "MUM-WH", Name = "Mumbai Warehouse", Address = "Mumbai, Maharashtra, India" };
                 var chennai = new Site { Id = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c93"), Code = "CHEN-PLT", Name = "Chennai Plant", Address = "Chennai, Tamil Nadu, India" };
                 var bengaluru = new Site { Id = Guid.Parse("f1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c94"), Code = "BLR-HUB", Name = "Bengaluru Hub", Address = "Bengaluru, Karnataka, India" };
 
-                await context.Sites.AddRangeAsync(pune, mumbai, chennai, bengaluru);
+                await context.Sites.AddRangeAsync(mumbai, chennai, bengaluru);
                 await context.SaveChangesAsync();
 
-                var puneWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c91"), Code = "PUNE-WH-1", Name = "Pune DC Whse" };
                 var mumbaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c92"), Code = "MUM-WH-1", Name = "Mumbai Whse" };
                 var chennaiWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c93"), Code = "CHEN-WH-1", Name = "Chennai Whse" };
                 var bengaluruWh = new Warehouse { Id = Guid.Parse("f2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c94"), Code = "BLR-WH-1", Name = "Bengaluru Whse" };
 
-                await context.Warehouses.AddRangeAsync(puneWh, mumbaiWh, chennaiWh, bengaluruWh);
+                await context.Warehouses.AddRangeAsync(mumbaiWh, chennaiWh, bengaluruWh);
                 await context.SaveChangesAsync();
             }
 

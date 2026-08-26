@@ -63,7 +63,7 @@ namespace Infrastructure.Services
                                 AlertType = AlertType.UnauthorizedMovement,
                                 Severity = AlertSeverity.Critical,
                                 Title = "Geofence Violation",
-                                Message = $"Asset '{assetName}' with GPS Device {device?.Imei} has exited the authorized Pune DC Geofence! Location: ({history.Latitude}, {history.Longitude})",
+                                Message = $"Asset '{assetName}' with GPS Device {device?.Imei} has exited the authorized Geofence! Location: ({history.Latitude}, {history.Longitude})",
                                 IsResolved = false,
                                 CreatedOn = DateTime.UtcNow
                             };
