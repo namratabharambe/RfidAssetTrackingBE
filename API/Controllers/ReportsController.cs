@@ -22,18 +22,44 @@ namespace API.Controllers
         [HttpGet("{reportType}")]
         public async Task<IActionResult> DownloadReport(
             string reportType,
-            [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null,
-            [FromQuery] DateTime? fromDate = null,
-            [FromQuery] DateTime? toDate = null,
+            [FromQuery] string? startDate = null,
+            [FromQuery] string? endDate = null,
+            [FromQuery] string? fromDate = null,
+            [FromQuery] string? toDate = null,
+            [FromQuery] string? from = null,
+            [FromQuery] string? to = null,
+            [FromQuery] string? start = null,
+            [FromQuery] string? end = null,
             [FromQuery] Guid? siteId = null,
             [FromQuery] string? siteName = null,
             [FromQuery] string? site = null,
             CancellationToken cancellationToken = default)
         {
-            var start = startDate ?? fromDate;
-            var end = endDate ?? toDate;
-            var targetSiteName = siteName ?? site;
+            var rawStart = !string.IsNullOrWhiteSpace(startDate) ? startDate :
+                           !string.IsNullOrWhiteSpace(fromDate) ? fromDate :
+                           !string.IsNullOrWhiteSpace(from) ? from : start;
+
+            var rawEnd = !string.IsNullOrWhiteSpace(endDate) ? endDate :
+                         !string.IsNullOrWhiteSpace(toDate) ? toDate :
+                         !string.IsNullOrWhiteSpace(to) ? to : end;
+
+            DateTime? parsedStart = null;
+            if (!string.IsNullOrWhiteSpace(rawStart) && DateTime.TryParse(rawStart, out var sVal))
+            {
+                parsedStart = sVal;
+            }
+
+            DateTime? parsedEnd = null;
+            if (!string.IsNullOrWhiteSpace(rawEnd) && DateTime.TryParse(rawEnd, out var eVal))
+            {
+                parsedEnd = eVal;
+            }
+
+            var targetSiteName = (siteName ?? site)?.Trim();
+            if (targetSiteName != null && (targetSiteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) || targetSiteName.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                targetSiteName = null;
+            }
 
             Guid? targetSiteId = siteId;
             if (!targetSiteId.HasValue && Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
@@ -41,18 +67,9 @@ namespace API.Controllers
                 targetSiteId = parsedHSite;
             }
 
-            if (!targetSiteId.HasValue && string.IsNullOrEmpty(targetSiteName) && HttpContext.User.Identity?.IsAuthenticated == true)
-            {
-                var siteClaim = HttpContext.User.Claims
-                    .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
-                    .Select(c => c.Value)
-                    .FirstOrDefault(v => Guid.TryParse(v, out var parsed) && parsed != Guid.Empty);
-                if (Guid.TryParse(siteClaim, out var g)) targetSiteId = g;
-            }
-
             try
             {
-                var bytes = await _mediator.Send(new DownloadReportQuery(reportType, start, end, targetSiteId, targetSiteName), cancellationToken);
+                var bytes = await _mediator.Send(new DownloadReportQuery(reportType, parsedStart, parsedEnd, targetSiteId, targetSiteName), cancellationToken);
                 return File(bytes, "text/csv", $"{reportType}Report.csv");
             }
             catch (System.ArgumentException)

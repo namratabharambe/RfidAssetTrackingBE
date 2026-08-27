@@ -500,18 +500,37 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<Site>();
-            var allSites = await repo.GetAllAsync(cancellationToken);
+            var allSites = await repo.GetFilteredAsync(s => !s.IsDeleted, cancellationToken);
 
             var userEmail = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "email")?.Value ?? "";
             var userName = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == "unique_name" || c.Type == "username")?.Value ?? User.Identity?.Name ?? "";
-            var identityLower = (userName + " " + userEmail).ToLower();
-            var isDevamUser = identityLower.Contains("devam");
+            var userIdStr = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier || c.Type == "sub" || c.Type == "id")?.Value ?? "";
 
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
+            var roles = User.Claims
+                .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles")
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Select(r => r.Trim())
+                .ToList();
+
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.IsInRole("SuperAdmin") ||
+                roles.Any(r => r.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || r.Equals("System Administrator", StringComparison.OrdinalIgnoreCase) || r.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase)) ||
+                User.HasClaim(c => (c.Type == "allowed_site_ids" && c.Value == "ALL") || (c.Type == "sites" && c.Value == "GLOBAL_ALL_SITES"));
+
+            var isSiteScopedRole = roles.Any(r =>
+                r.Equals("Site Admin", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("SiteAdmin", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("Store Keeper", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("StoreKeeper", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("Safety Inspector", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("SafetyInspector", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("Operator", StringComparison.OrdinalIgnoreCase) ||
+                r.Equals("Viewer", StringComparison.OrdinalIgnoreCase)
+            );
 
             var allowedSiteIds = User.Claims
-                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
-                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids" || c.Type == "allowed_site_ids_csv")
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Select(v => Guid.TryParse(v.Trim(), out var g) ? (Guid?)g : null)
                 .Where(g => g.HasValue && g.Value != Guid.Empty)
                 .Select(g => g!.Value)
                 .Distinct()
@@ -522,15 +541,20 @@ namespace API.Controllers
                 allowedSiteIds.Add(parsedHSite);
             }
 
-            IEnumerable<Site> filtered = allSites;
-
-            if (allowedSiteIds.Any())
+            IEnumerable<Site> filtered;
+            if (isSuperAdmin)
             {
-                filtered = filtered.Where(s => allowedSiteIds.Contains(s.Id));
+                filtered = allSites.Where(s =>
+                    !string.IsNullOrWhiteSpace(s.CreatedBy) && (
+                        (!string.IsNullOrWhiteSpace(userEmail) && s.CreatedBy.Equals(userEmail, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(userName) && s.CreatedBy.Equals(userName, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(userIdStr) && s.CreatedBy.Equals(userIdStr, StringComparison.OrdinalIgnoreCase))
+                    )
+                );
             }
-            else if (!isSuperAdmin)
+            else
             {
-                filtered = new List<Site>();
+                filtered = allSites.Where(s => allowedSiteIds.Contains(s.Id));
             }
 
             if (siteId.HasValue)
@@ -544,7 +568,7 @@ namespace API.Controllers
             }
 
             var list = filtered.ToList();
-            Response.Headers.Add("X-Total-Count", list.Count.ToString());
+            Response.Headers.Append("X-Total-Count", list.Count.ToString());
             return Ok(Mapper.Map<List<SiteDto>>(list));
         }
 
@@ -560,16 +584,22 @@ namespace API.Controllers
                 code += "-" + Random.Shared.Next(100, 999);
             }
 
+            var userEmail = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "email")?.Value;
+            var userName = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == "unique_name" || c.Type == "username")?.Value ?? User.Identity?.Name;
+            var creator = !string.IsNullOrWhiteSpace(userEmail) ? userEmail : (!string.IsNullOrWhiteSpace(userName) ? userName : User.FindFirst("sub")?.Value);
+
             var entity = new Site
             {
                 Code = code,
                 Name = createDto.Name,
-                Address = createDto.Address
+                Address = createDto.Address,
+                CreatedBy = creator,
+                CreatedOn = DateTime.UtcNow
             };
 
             await repo.AddAsync(entity, cancellationToken);
             await UnitOfWork.SaveChangesAsync(cancellationToken);
-            return Ok(Mapper.Map<SiteDto>(entity));
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, Mapper.Map<SiteDto>(entity));
         }
     }
 
@@ -592,43 +622,47 @@ namespace API.Controllers
             var repo = UnitOfWork.Repository<Warehouse>();
             var allWarehouses = await repo.GetFilteredAsync(w => !w.IsDeleted, cancellationToken);
 
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") && (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("System Administrator", StringComparison.OrdinalIgnoreCase)));
+            var userEmail = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "email")?.Value ?? "";
+            var userName = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == "unique_name" || c.Type == "username")?.Value ?? User.Identity?.Name ?? "";
+            var userIdStr = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier || c.Type == "sub" || c.Type == "id")?.Value ?? "";
 
-            var allowedSiteIds = User.Claims
-                .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
-                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
-                .Where(g => g.HasValue && g.Value != Guid.Empty)
-                .Select(g => g!.Value)
-                .Distinct()
-                .ToHashSet();
+            var roles = User.Claims
+                .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles")
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Select(r => r.Trim())
+                .ToList();
+
+            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || User.IsInRole("SuperAdmin") ||
+                roles.Any(r => r.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || r.Equals("System Administrator", StringComparison.OrdinalIgnoreCase) || r.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase));
 
             var allowedWhIds = User.Claims
-                .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
-                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids" || c.Type == "allowed_warehouse_ids_csv")
+                .SelectMany(c => c.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Select(v => Guid.TryParse(v.Trim(), out var g) ? (Guid?)g : null)
                 .Where(g => g.HasValue && g.Value != Guid.Empty)
                 .Select(g => g!.Value)
                 .Distinct()
                 .ToHashSet();
 
-            // Header overrides
             if (Request.Headers.TryGetValue("X-Warehouse-Id", out var hWh) && Guid.TryParse(hWh.FirstOrDefault(), out var parsedHWh) && parsedHWh != Guid.Empty)
             {
                 allowedWhIds.Add(parsedHWh);
             }
-            if (Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
-            {
-                allowedSiteIds.Add(parsedHSite);
-            }
 
-            IEnumerable<Warehouse> filtered = allWarehouses;
-
-            if (allowedWhIds.Any())
+            IEnumerable<Warehouse> filtered;
+            if (isSuperAdmin)
             {
-                filtered = filtered.Where(w => allowedWhIds.Contains(w.Id));
+                filtered = allWarehouses.Where(w =>
+                    !string.IsNullOrWhiteSpace(w.CreatedBy) && (
+                        (!string.IsNullOrWhiteSpace(userEmail) && w.CreatedBy.Equals(userEmail, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(userName) && w.CreatedBy.Equals(userName, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(userIdStr) && w.CreatedBy.Equals(userIdStr, StringComparison.OrdinalIgnoreCase))
+                    )
+                );
             }
-            else if (!isSuperAdmin)
+            else
             {
-                filtered = new List<Warehouse>();
+                filtered = allWarehouses.Where(w => allowedWhIds.Contains(w.Id));
             }
 
             if (warehouseId.HasValue)
@@ -642,7 +676,7 @@ namespace API.Controllers
             }
 
             var list = filtered.ToList();
-            Response.Headers.Add("X-Total-Count", list.Count.ToString());
+            Response.Headers.Append("X-Total-Count", list.Count.ToString());
             return Ok(Mapper.Map<List<WarehouseDto>>(list));
         }
 
@@ -658,11 +692,17 @@ namespace API.Controllers
                 code += "-" + Random.Shared.Next(100, 999);
             }
 
+            var userEmail = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "email")?.Value;
+            var userName = User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == "unique_name" || c.Type == "username")?.Value ?? User.Identity?.Name;
+            var creator = !string.IsNullOrWhiteSpace(userEmail) ? userEmail : (!string.IsNullOrWhiteSpace(userName) ? userName : User.FindFirst("sub")?.Value);
+
             var entity = new Warehouse
             {
                 Code = code,
                 Name = createDto.Name,
-                Address = createDto.Address
+                Address = createDto.Address,
+                CreatedBy = creator,
+                CreatedOn = DateTime.UtcNow
             };
 
             await repo.AddAsync(entity, cancellationToken);
@@ -829,6 +869,149 @@ namespace API.Controllers
     public class RFIDTagsController : CrudControllerBase<RFIDTag, RFIDTagDto, CreateRFIDTagDto>
     {
         public RFIDTagsController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<RFIDTagDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<RFIDTag>();
+            var targetWhId = warehouseId ?? CurrentUserWarehouseId;
+            var targetSiteId = siteId ?? CurrentUserSiteId;
+
+            Expression<Func<RFIDTag, bool>>? filter = null;
+
+            if (targetWhId.HasValue)
+            {
+                filter = t => (t.Asset != null && t.Asset.WarehouseId == targetWhId.Value) || t.AssetId == null;
+            }
+            else if (targetSiteId.HasValue)
+            {
+                filter = t => (t.Asset != null && t.Asset.SiteId == targetSiteId.Value) || t.AssetId == null;
+            }
+            else if (!IsSuperAdmin)
+            {
+                var allowedWhs = AllowedWarehouseIds;
+                var allowedSites = AllowedSiteIds;
+                var currentUserIdStr = CurrentUserId?.ToString();
+                var currentEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value ?? User.Identity?.Name;
+
+                if (allowedWhs.Any())
+                {
+                    filter = t => (t.Asset != null && t.Asset.WarehouseId.HasValue && allowedWhs.Contains(t.Asset.WarehouseId.Value))
+                               || t.AssetId == null;
+                }
+                else if (allowedSites.Any())
+                {
+                    filter = t => (t.Asset != null && t.Asset.SiteId.HasValue && allowedSites.Contains(t.Asset.SiteId.Value))
+                               || t.AssetId == null;
+                }
+                else
+                {
+                    filter = t => (t.Asset != null && (t.Asset.CreatedBy == currentUserIdStr || (currentEmail != null && t.Asset.CreatedBy == currentEmail)))
+                               || t.AssetId == null;
+                }
+            }
+
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken, t => t.Asset!);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<RFIDTagDto>>(items));
+        }
+
+        [HttpPost]
+        public override async Task<ActionResult<RFIDTagDto>> Create([FromBody] CreateRFIDTagDto createDto, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(createDto.EpcCode))
+            {
+                return BadRequest("EPC Code is required.");
+            }
+
+            var epc = createDto.EpcCode.Trim();
+            var repo = UnitOfWork.Repository<RFIDTag>();
+
+            Guid? validAssetId = null;
+            if (createDto.AssetId.HasValue && createDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(createDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = createDto.AssetId.Value;
+                    asset.RfidTag = epc;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            var existingTags = await repo.GetFilteredAsync(t => t.EpcCode == epc, cancellationToken);
+            var existing = existingTags.FirstOrDefault();
+
+            if (existing != null)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedOn = null;
+                existing.DeletedBy = null;
+                existing.AssetId = validAssetId;
+                if (!string.IsNullOrWhiteSpace(createDto.TidCode))
+                    existing.TidCode = createDto.TidCode.Trim();
+                if (!string.IsNullOrEmpty(createDto.Status) && Enum.TryParse<TagStatus>(createDto.Status, true, out var parsedStatus))
+                    existing.Status = parsedStatus;
+
+                repo.Update(existing);
+                await UnitOfWork.SaveChangesAsync(cancellationToken);
+                return Ok(Mapper.Map<RFIDTagDto>(existing));
+            }
+
+            var entity = new RFIDTag
+            {
+                Id = Guid.NewGuid(),
+                EpcCode = epc,
+                TidCode = createDto.TidCode?.Trim(),
+                Status = (!string.IsNullOrEmpty(createDto.Status) && Enum.TryParse<TagStatus>(createDto.Status, true, out var st)) ? st : TagStatus.Active,
+                AssetId = validAssetId,
+                CreatedOn = DateTime.UtcNow
+            };
+
+            await repo.AddAsync(entity, cancellationToken);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, Mapper.Map<RFIDTagDto>(entity));
+        }
+
+        [HttpPut("{id:guid}")]
+        public override async Task<IActionResult> Update(Guid id, [FromBody] CreateRFIDTagDto updateDto, CancellationToken cancellationToken)
+        {
+            var repo = UnitOfWork.Repository<RFIDTag>();
+            var entity = await repo.GetByIdAsync(id, cancellationToken);
+            if (entity == null) return NotFound();
+
+            var epc = !string.IsNullOrWhiteSpace(updateDto.EpcCode) ? updateDto.EpcCode.Trim() : entity.EpcCode;
+
+            Guid? validAssetId = null;
+            if (updateDto.AssetId.HasValue && updateDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(updateDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = updateDto.AssetId.Value;
+                    asset.RfidTag = epc;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(updateDto.EpcCode))
+                entity.EpcCode = epc;
+            if (updateDto.TidCode != null)
+                entity.TidCode = updateDto.TidCode.Trim();
+            entity.AssetId = validAssetId;
+            if (!string.IsNullOrEmpty(updateDto.Status) && Enum.TryParse<TagStatus>(updateDto.Status, true, out var parsedStatus))
+                entity.Status = parsedStatus;
+
+            repo.Update(entity);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return NoContent();
+        }
     }
 
     [Authorize]
@@ -837,6 +1020,149 @@ namespace API.Controllers
     public class BarcodesController : CrudControllerBase<Barcode, BarcodeDto, CreateBarcodeDto>
     {
         public BarcodesController(IUnitOfWork unitOfWork, IMapper mapper) : base(unitOfWork, mapper) { }
+
+        [HttpGet]
+        public override async Task<ActionResult<IEnumerable<BarcodeDto>>> GetAll(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 200,
+            [FromQuery] string? search = null,
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var repo = UnitOfWork.Repository<Barcode>();
+            var targetWhId = warehouseId ?? CurrentUserWarehouseId;
+            var targetSiteId = siteId ?? CurrentUserSiteId;
+
+            Expression<Func<Barcode, bool>>? filter = null;
+
+            if (targetWhId.HasValue)
+            {
+                filter = b => (b.Asset != null && b.Asset.WarehouseId == targetWhId.Value) || b.AssetId == null;
+            }
+            else if (targetSiteId.HasValue)
+            {
+                filter = b => (b.Asset != null && b.Asset.SiteId == targetSiteId.Value) || b.AssetId == null;
+            }
+            else if (!IsSuperAdmin)
+            {
+                var allowedWhs = AllowedWarehouseIds;
+                var allowedSites = AllowedSiteIds;
+                var currentUserIdStr = CurrentUserId?.ToString();
+                var currentEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value ?? User.Identity?.Name;
+
+                if (allowedWhs.Any())
+                {
+                    filter = b => (b.Asset != null && b.Asset.WarehouseId.HasValue && allowedWhs.Contains(b.Asset.WarehouseId.Value))
+                               || b.AssetId == null;
+                }
+                else if (allowedSites.Any())
+                {
+                    filter = b => (b.Asset != null && b.Asset.SiteId.HasValue && allowedSites.Contains(b.Asset.SiteId.Value))
+                               || b.AssetId == null;
+                }
+                else
+                {
+                    filter = b => (b.Asset != null && (b.Asset.CreatedBy == currentUserIdStr || (currentEmail != null && b.Asset.CreatedBy == currentEmail)))
+                               || b.AssetId == null;
+                }
+            }
+
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken, b => b.Asset!);
+            Response.Headers.Add("X-Total-Count", total.ToString());
+            return Ok(Mapper.Map<List<BarcodeDto>>(items));
+        }
+
+        [HttpPost]
+        public override async Task<ActionResult<BarcodeDto>> Create([FromBody] CreateBarcodeDto createDto, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(createDto.BarcodeValue))
+            {
+                return BadRequest("Barcode Value is required.");
+            }
+
+            var barcodeVal = createDto.BarcodeValue.Trim();
+            var repo = UnitOfWork.Repository<Barcode>();
+
+            Guid? validAssetId = null;
+            if (createDto.AssetId.HasValue && createDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(createDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = createDto.AssetId.Value;
+                    asset.Barcode = barcodeVal;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            var existingBarcodes = await repo.GetFilteredAsync(b => b.BarcodeValue == barcodeVal, cancellationToken);
+            var existing = existingBarcodes.FirstOrDefault();
+
+            if (existing != null)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedOn = null;
+                existing.DeletedBy = null;
+                existing.AssetId = validAssetId;
+                if (!string.IsNullOrWhiteSpace(createDto.Format))
+                    existing.Format = createDto.Format.Trim();
+                if (createDto.IsActive.HasValue)
+                    existing.IsActive = createDto.IsActive.Value;
+
+                repo.Update(existing);
+                await UnitOfWork.SaveChangesAsync(cancellationToken);
+                return Ok(Mapper.Map<BarcodeDto>(existing));
+            }
+
+            var entity = new Barcode
+            {
+                Id = Guid.NewGuid(),
+                BarcodeValue = barcodeVal,
+                Format = string.IsNullOrWhiteSpace(createDto.Format) ? "Code128" : createDto.Format.Trim(),
+                IsActive = createDto.IsActive ?? true,
+                AssetId = validAssetId,
+                CreatedOn = DateTime.UtcNow
+            };
+
+            await repo.AddAsync(entity, cancellationToken);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, Mapper.Map<BarcodeDto>(entity));
+        }
+
+        [HttpPut("{id:guid}")]
+        public override async Task<IActionResult> Update(Guid id, [FromBody] CreateBarcodeDto updateDto, CancellationToken cancellationToken)
+        {
+            var repo = UnitOfWork.Repository<Barcode>();
+            var entity = await repo.GetByIdAsync(id, cancellationToken);
+            if (entity == null) return NotFound();
+
+            var barcodeVal = !string.IsNullOrWhiteSpace(updateDto.BarcodeValue) ? updateDto.BarcodeValue.Trim() : entity.BarcodeValue;
+
+            Guid? validAssetId = null;
+            if (updateDto.AssetId.HasValue && updateDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(updateDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = updateDto.AssetId.Value;
+                    asset.Barcode = barcodeVal;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(updateDto.BarcodeValue))
+                entity.BarcodeValue = barcodeVal;
+            if (!string.IsNullOrWhiteSpace(updateDto.Format))
+                entity.Format = updateDto.Format.Trim();
+            entity.AssetId = validAssetId;
+            if (updateDto.IsActive.HasValue)
+                entity.IsActive = updateDto.IsActive.Value;
+
+            repo.Update(entity);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+            return NoContent();
+        }
     }
 
     [Authorize]
@@ -856,10 +1182,187 @@ namespace API.Controllers
             CancellationToken cancellationToken = default)
         {
             var repo = UnitOfWork.Repository<GPSDevice>();
-            var filter = BuildCombinedFilter(siteId, warehouseId);
-            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken);
+            var targetWhId = warehouseId ?? CurrentUserWarehouseId;
+            var targetSiteId = siteId ?? CurrentUserSiteId;
+
+            Expression<Func<GPSDevice, bool>>? filter = null;
+
+            if (targetWhId.HasValue)
+            {
+                filter = g => (g.Asset != null && g.Asset.WarehouseId == targetWhId.Value) || g.AssetId == null;
+            }
+            else if (targetSiteId.HasValue)
+            {
+                filter = g => (g.Asset != null && g.Asset.SiteId == targetSiteId.Value) || g.AssetId == null;
+            }
+            else if (!IsSuperAdmin)
+            {
+                var allowedWhs = AllowedWarehouseIds;
+                var allowedSites = AllowedSiteIds;
+                var currentUserIdStr = CurrentUserId?.ToString();
+                var currentEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value ?? User.Identity?.Name;
+
+                if (allowedWhs.Any())
+                {
+                    filter = g => (g.Asset != null && g.Asset.WarehouseId.HasValue && allowedWhs.Contains(g.Asset.WarehouseId.Value))
+                               || g.AssetId == null;
+                }
+                else if (allowedSites.Any())
+                {
+                    filter = g => (g.Asset != null && g.Asset.SiteId.HasValue && allowedSites.Contains(g.Asset.SiteId.Value))
+                               || g.AssetId == null;
+                }
+                else
+                {
+                    filter = g => (g.Asset != null && (g.Asset.CreatedBy == currentUserIdStr || (currentEmail != null && g.Asset.CreatedBy == currentEmail)))
+                               || g.AssetId == null;
+                }
+            }
+
+            var (items, total) = await repo.GetPagedAsync(page, size, search, filter, null, cancellationToken, g => g.Asset!);
             Response.Headers.Add("X-Total-Count", total.ToString());
             return Ok(Mapper.Map<List<GPSDeviceDto>>(items));
+        }
+
+        [HttpPost]
+        public override async Task<ActionResult<GPSDeviceDto>> Create([FromBody] CreateGPSDeviceDto createDto, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(createDto.Imei))
+            {
+                return BadRequest("IMEI is required.");
+            }
+
+            var imei = createDto.Imei.Trim();
+            var repo = UnitOfWork.Repository<GPSDevice>();
+
+            Guid? validAssetId = null;
+            if (createDto.AssetId.HasValue && createDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(createDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = createDto.AssetId.Value;
+                    asset.GpsId = imei;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            var existingDevices = await repo.GetFilteredAsync(g => g.Imei == imei, cancellationToken);
+            var existing = existingDevices.FirstOrDefault();
+
+            if (existing != null)
+            {
+                existing.IsDeleted = false;
+                existing.DeletedOn = null;
+                existing.DeletedBy = null;
+                existing.AssetId = validAssetId;
+                if (!string.IsNullOrWhiteSpace(createDto.SimNumber))
+                    existing.SimNumber = createDto.SimNumber.Trim();
+                if (!string.IsNullOrEmpty(createDto.Status) && Enum.TryParse<DeviceStatus>(createDto.Status, true, out var parsedStatus))
+                    existing.Status = parsedStatus;
+
+                repo.Update(existing);
+                await UnitOfWork.SaveChangesAsync(cancellationToken);
+
+                await SyncVehicleForGpsDeviceAsync(existing, cancellationToken);
+
+                return Ok(Mapper.Map<GPSDeviceDto>(existing));
+            }
+
+            var entity = new GPSDevice
+            {
+                Id = Guid.NewGuid(),
+                Imei = imei,
+                SimNumber = createDto.SimNumber?.Trim(),
+                BatteryLevel = 100,
+                Status = (!string.IsNullOrEmpty(createDto.Status) && Enum.TryParse<DeviceStatus>(createDto.Status, true, out var st)) ? st : DeviceStatus.Online,
+                AssetId = validAssetId,
+                CreatedOn = DateTime.UtcNow
+            };
+
+            await repo.AddAsync(entity, cancellationToken);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+
+            await SyncVehicleForGpsDeviceAsync(entity, cancellationToken);
+
+            return CreatedAtAction(nameof(GetById), new { id = entity.Id }, Mapper.Map<GPSDeviceDto>(entity));
+        }
+
+        [HttpPut("{id:guid}")]
+        public override async Task<IActionResult> Update(Guid id, [FromBody] CreateGPSDeviceDto updateDto, CancellationToken cancellationToken)
+        {
+            var repo = UnitOfWork.Repository<GPSDevice>();
+            var entity = await repo.GetByIdAsync(id, cancellationToken);
+            if (entity == null) return NotFound();
+
+            var imei = !string.IsNullOrWhiteSpace(updateDto.Imei) ? updateDto.Imei.Trim() : entity.Imei;
+
+            Guid? validAssetId = null;
+            if (updateDto.AssetId.HasValue && updateDto.AssetId.Value != Guid.Empty)
+            {
+                var asset = await UnitOfWork.Repository<Asset>().GetByIdAsync(updateDto.AssetId.Value, cancellationToken);
+                if (asset != null && !asset.IsDeleted)
+                {
+                    validAssetId = updateDto.AssetId.Value;
+                    asset.GpsId = imei;
+                    UnitOfWork.Repository<Asset>().Update(asset);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(updateDto.Imei))
+                entity.Imei = imei;
+            if (updateDto.SimNumber != null)
+                entity.SimNumber = updateDto.SimNumber.Trim();
+            entity.AssetId = validAssetId;
+            if (!string.IsNullOrEmpty(updateDto.Status) && Enum.TryParse<DeviceStatus>(updateDto.Status, true, out var parsedStatus))
+                entity.Status = parsedStatus;
+
+            repo.Update(entity);
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+
+            await SyncVehicleForGpsDeviceAsync(entity, cancellationToken);
+
+            return NoContent();
+        }
+
+        private async Task SyncVehicleForGpsDeviceAsync(GPSDevice device, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var vehicleRepo = UnitOfWork.Repository<Vehicle>();
+                var vehicles = await vehicleRepo.GetFilteredAsync(v => v.DeviceNum == device.Imei, cancellationToken);
+                var vehicle = vehicles.FirstOrDefault();
+                if (vehicle == null)
+                {
+                    var asset = device.AssetId.HasValue ? await UnitOfWork.Repository<Asset>().GetByIdAsync(device.AssetId.Value, cancellationToken) : null;
+                    var newVehicle = new Vehicle
+                    {
+                        Id = Guid.NewGuid(),
+                        DeviceNum = device.Imei,
+                        RegName = asset?.Name ?? $"GPS Tracker {device.Imei.Substring(Math.Max(0, device.Imei.Length - 4))}",
+                        Status = "Online",
+                        Lat = 18.620321 + (new Random().NextDouble() - 0.5) * 0.005,
+                        Lon = 73.856742 + (new Random().NextDouble() - 0.5) * 0.005,
+                        Speed = 15,
+                        Direction = 90,
+                        Battery = device.BatteryLevel > 0 ? device.BatteryLevel : 100,
+                        GpsTime = DateTime.UtcNow,
+                        UpdateTime = DateTime.UtcNow,
+                        CreatedOn = DateTime.UtcNow
+                    };
+                    await vehicleRepo.AddAsync(newVehicle, cancellationToken);
+                    await UnitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                else if (vehicle.IsDeleted)
+                {
+                    vehicle.IsDeleted = false;
+                    vehicle.DeletedOn = null;
+                    vehicle.DeletedBy = null;
+                    vehicleRepo.Update(vehicle);
+                    await UnitOfWork.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch { }
         }
     }
 

@@ -280,13 +280,10 @@ namespace API.Controllers
         [HttpPut("{id:guid}")]
         public async Task<IActionResult> Update(
             Guid id,
-            UpdateAssetCommand command,
+            [FromBody] UpdateAssetDto dto,
             [FromServices] Application.Interfaces.IUnitOfWork unitOfWork,
             CancellationToken cancellationToken)
         {
-            if (id != command.Id)
-                return BadRequest();
-
             var existing = await unitOfWork.Repository<Domain.Entities.Asset>().GetByIdAsync(id, cancellationToken);
             if (existing == null) return NotFound();
 
@@ -315,6 +312,49 @@ namespace API.Controllers
                     }
                 }
             }
+
+            Enum.TryParse<Domain.Enums.AssetStatus>(dto.Status, true, out var parsedStatus);
+
+            var command = new UpdateAssetCommand(
+                id,
+                dto.AssetNumber ?? existing.AssetNumber,
+                !string.IsNullOrWhiteSpace(dto.Name) ? dto.Name : existing.Name,
+                dto.AssetCategoryId != Guid.Empty ? dto.AssetCategoryId : existing.AssetCategoryId,
+                dto.Description ?? existing.Description,
+                dto.SerialNumber ?? existing.SerialNumber,
+                parsedStatus != 0 ? parsedStatus : existing.Status,
+                dto.QrCode ?? existing.QrCode,
+                dto.Group ?? existing.Group,
+                dto.AssetType ?? existing.AssetType,
+                dto.OwnerDepartment ?? existing.OwnerDepartment,
+                dto.Industry ?? existing.Industry,
+                dto.BusinessUnit ?? existing.BusinessUnit,
+                dto.CurrentCustodian ?? existing.CurrentCustodian,
+                dto.CustodianEmail ?? existing.CustodianEmail,
+                dto.Model ?? existing.Model,
+                dto.WarrantyProvider ?? existing.WarrantyProvider,
+                dto.PurchaseDate ?? existing.PurchaseDate,
+                dto.PurchasePrice ?? existing.PurchasePrice,
+                dto.WarrantyExpiryDate ?? existing.WarrantyExpiryDate,
+                dto.ManufacturerId ?? existing.ManufacturerId,
+                dto.SiteId ?? existing.SiteId,
+                dto.ZoneId ?? existing.ZoneId,
+                dto.WarehouseId ?? existing.WarehouseId,
+                dto.DeliveryChallanNo ?? existing.DeliveryChallanNo,
+                dto.InvoiceNumber ?? existing.InvoiceNumber,
+                dto.InvoiceDate ?? existing.InvoiceDate,
+                dto.PoNumber ?? existing.PoNumber,
+                dto.Image ?? existing.Image,
+                dto.EntryQty ?? existing.EntryQty,
+                dto.IssuedQty ?? existing.IssuedQty,
+                dto.BalanceQty ?? dto.BalancedQty ?? existing.BalanceQty,
+                dto.BalancedQty ?? dto.BalanceQty ?? existing.BalanceQty,
+                dto.Unit ?? dto.UnitQty ?? existing.Unit,
+                dto.UnitQty ?? dto.Unit ?? existing.Unit,
+                dto.GpsId ?? existing.GpsId,
+                dto.RfidTag ?? existing.RfidTag,
+                dto.Barcode ?? existing.Barcode
+            );
 
             await _mediator.Send(command, cancellationToken);
             return NoContent();

@@ -9,6 +9,7 @@ namespace Application.Users.Queries
         Guid? SiteId = null, 
         Guid? WarehouseId = null, 
         List<Guid>? AllowedSiteIds = null, 
+        List<Guid>? AllowedWarehouseIds = null, 
         string? CurrentUserIdentity = null, 
         bool IsSuperAdmin = false
     ) : IRequest<IEnumerable<UserDto>>;

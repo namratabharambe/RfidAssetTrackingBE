@@ -59,6 +59,10 @@ namespace Domain.Entities
         public decimal? BalanceQty { get; set; }
         public string? Unit { get; set; }
         
+        public string? GpsId { get; set; }
+        public string? RfidTag { get; set; }
+        public string? Barcode { get; set; }
+        
         public ICollection<AssetImage> AssetImages { get; set; } = new List<AssetImage>();
         public ICollection<RFIDTag> RFIDTags { get; set; } = new List<RFIDTag>();
         public ICollection<Barcode> Barcodes { get; set; } = new List<Barcode>();

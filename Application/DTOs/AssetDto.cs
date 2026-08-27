@@ -43,6 +43,9 @@ public record AssetDto(
     decimal? IssuedQty = null,
     decimal? BalanceQty = null,
     string? Unit = null,
+    string? GpsId = null,
+    string? RfidTag = null,
+    string? Barcode = null,
     string? CreatedBy = null,
     DateTime? CreatedOn = null,
     string? UpdatedBy = null,
@@ -78,7 +81,16 @@ public record CreateAssetDto(
     string? InvoiceNumber = null,
     DateTime? InvoiceDate = null,
     string? PoNumber = null,
-    string? Image = null
+    string? Image = null,
+    decimal? EntryQty = null,
+    decimal? IssuedQty = null,
+    decimal? BalanceQty = null,
+    decimal? BalancedQty = null,
+    string? Unit = null,
+    string? UnitQty = null,
+    string? GpsId = null,
+    string? RfidTag = null,
+    string? Barcode = null
 );
 
 public record UpdateAssetDto(
@@ -110,7 +122,16 @@ public record UpdateAssetDto(
     string? InvoiceNumber = null,
     DateTime? InvoiceDate = null,
     string? PoNumber = null,
-    string? Image = null
+    string? Image = null,
+    decimal? EntryQty = null,
+    decimal? IssuedQty = null,
+    decimal? BalanceQty = null,
+    decimal? BalancedQty = null,
+    string? Unit = null,
+    string? UnitQty = null,
+    string? GpsId = null,
+    string? RfidTag = null,
+    string? Barcode = null
 );
 
 public record AssetCodeOptionDto(

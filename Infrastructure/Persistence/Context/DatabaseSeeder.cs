@@ -28,6 +28,9 @@ namespace Infrastructure.Persistence.Context
                     ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""IssuedQty"" numeric;
                     ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""BalanceQty"" numeric;
                     ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""Unit"" text;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""GpsId"" text;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""RfidTag"" text;
+                    ALTER TABLE ""Assets"" ADD COLUMN IF NOT EXISTS ""Barcode"" text;
 
                     CREATE TABLE IF NOT EXISTS ""AssetIssuances"" (
                         ""Id"" uuid NOT NULL PRIMARY KEY,

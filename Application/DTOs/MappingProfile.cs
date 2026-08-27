@@ -54,7 +54,10 @@ namespace Application.DTOs
                 .ForMember(dest => dest.WarehouseName, opt => opt.MapFrom(src => src.Warehouse != null ? src.Warehouse.Name : null))
                 .ForMember(dest => dest.ZoneName, opt => opt.MapFrom(src => src.Zone != null ? src.Zone.Name : null))
                 .ForMember(dest => dest.CurrentLocation, opt => opt.MapFrom(src => src.Location != null ? src.Location.Name : null))
-                .ForMember(dest => dest.Quantity, opt => opt.MapFrom(src => src.BalanceQty ?? src.EntryQty ?? 1));
+                .ForMember(dest => dest.Quantity, opt => opt.MapFrom(src => src.BalanceQty ?? src.EntryQty ?? 1))
+                .ForMember(dest => dest.GpsId, opt => opt.MapFrom(src => src.GpsId ?? (src.GPSDevices != null && src.GPSDevices.Any() ? src.GPSDevices.First().Imei : null)))
+                .ForMember(dest => dest.RfidTag, opt => opt.MapFrom(src => src.RfidTag ?? (src.RFIDTags != null && src.RFIDTags.Any() ? src.RFIDTags.First().EpcCode : null)))
+                .ForMember(dest => dest.Barcode, opt => opt.MapFrom(src => src.Barcode ?? (src.Barcodes != null && src.Barcodes.Any() ? src.Barcodes.First().BarcodeValue : null)));
 
             CreateMap<RFIDTag, RFIDTagDto>()
                 .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))

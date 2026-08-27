@@ -70,10 +70,21 @@ namespace Application.Assets.Commands.CreateAsset
                 if (request.InvoiceDate.HasValue) existingAsset.InvoiceDate = ToUtc(request.InvoiceDate);
                 if (request.PoNumber != null) existingAsset.PoNumber = request.PoNumber;
                 if (request.Image != null) existingAsset.Image = request.Image;
+                if (request.EntryQty.HasValue) existingAsset.EntryQty = request.EntryQty;
+                if (request.IssuedQty.HasValue) existingAsset.IssuedQty = request.IssuedQty;
+                var existingBalance = request.BalanceQty ?? request.BalancedQty;
+                if (existingBalance.HasValue) existingAsset.BalanceQty = existingBalance;
+                else if (request.EntryQty.HasValue && !existingAsset.BalanceQty.HasValue) existingAsset.BalanceQty = request.EntryQty.Value - (existingAsset.IssuedQty ?? 0);
+                var existingUnit = request.Unit ?? request.UnitQty;
+                if (existingUnit != null) existingAsset.Unit = existingUnit;
+                if (request.GpsId != null) existingAsset.GpsId = string.IsNullOrWhiteSpace(request.GpsId) ? null : request.GpsId.Trim();
+                if (request.RfidTag != null) existingAsset.RfidTag = string.IsNullOrWhiteSpace(request.RfidTag) ? null : request.RfidTag.Trim();
+                if (request.Barcode != null) existingAsset.Barcode = string.IsNullOrWhiteSpace(request.Barcode) ? null : request.Barcode.Trim();
 
                 existingAsset.UpdatedOn = DateTime.UtcNow;
 
                 _assetRepository.Update(existingAsset);
+                await SyncLinkedDevicesAsync(existingAsset, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return existingAsset.Id;
@@ -113,14 +124,128 @@ namespace Application.Assets.Commands.CreateAsset
             asset.InvoiceDate = ToUtc(request.InvoiceDate);
             asset.PoNumber = request.PoNumber;
             asset.Image = request.Image;
+            asset.EntryQty = request.EntryQty;
+            asset.IssuedQty = request.IssuedQty ?? 0;
+            var balance = request.BalanceQty ?? request.BalancedQty;
+            asset.BalanceQty = balance ?? (request.EntryQty.HasValue ? request.EntryQty.Value - (request.IssuedQty ?? 0) : null);
+            var unit = request.Unit ?? request.UnitQty;
+            asset.Unit = unit;
+            asset.GpsId = string.IsNullOrWhiteSpace(request.GpsId) ? null : request.GpsId.Trim();
+            asset.RfidTag = string.IsNullOrWhiteSpace(request.RfidTag) ? null : request.RfidTag.Trim();
+            asset.Barcode = string.IsNullOrWhiteSpace(request.Barcode) ? null : request.Barcode.Trim();
 
             asset.CreatedOn = DateTime.UtcNow;
 
             await _assetRepository.AddAsync(asset, cancellationToken);
-
+            await SyncLinkedDevicesAsync(asset, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             return asset.Id;
+        }
+
+        private async Task SyncLinkedDevicesAsync(Asset asset, CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(asset.GpsId))
+            {
+                var imei = asset.GpsId.Trim();
+                var gpsRepo = _unitOfWork.Repository<GPSDevice>();
+                var gpsList = await gpsRepo.GetFilteredAsync(g => g.Imei == imei, cancellationToken);
+                var gps = gpsList.FirstOrDefault();
+                if (gps != null)
+                {
+                    gps.AssetId = asset.Id;
+                    gps.IsDeleted = false;
+                    gpsRepo.Update(gps);
+                }
+                else
+                {
+                    await gpsRepo.AddAsync(new GPSDevice
+                    {
+                        Id = Guid.NewGuid(),
+                        Imei = imei,
+                        AssetId = asset.Id,
+                        Status = DeviceStatus.Online,
+                        BatteryLevel = 100,
+                        CreatedOn = DateTime.UtcNow
+                    }, cancellationToken);
+                }
+
+                // Sync Vehicles for Map
+                var vehRepo = _unitOfWork.Repository<Vehicle>();
+                var vehList = await vehRepo.GetFilteredAsync(v => v.DeviceNum == imei, cancellationToken);
+                var veh = vehList.FirstOrDefault();
+                if (veh != null)
+                {
+                    veh.RegName = !string.IsNullOrWhiteSpace(asset.Name) ? asset.Name : veh.RegName;
+                    veh.Status = "Online";
+                    veh.UpdateTime = DateTime.UtcNow;
+                    vehRepo.Update(veh);
+                }
+                else
+                {
+                    await vehRepo.AddAsync(new Vehicle
+                    {
+                        Id = Guid.NewGuid(),
+                        DeviceNum = imei,
+                        RegName = !string.IsNullOrWhiteSpace(asset.Name) ? asset.Name : $"Equipment {imei}",
+                        Status = "Online",
+                        Lat = 18.6210,
+                        Lon = 73.8570,
+                        UpdateTime = DateTime.UtcNow
+                    }, cancellationToken);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(asset.RfidTag))
+            {
+                var epc = asset.RfidTag.Trim();
+                var rfidRepo = _unitOfWork.Repository<RFIDTag>();
+                var rfidList = await rfidRepo.GetFilteredAsync(t => t.EpcCode == epc, cancellationToken);
+                var rfid = rfidList.FirstOrDefault();
+                if (rfid != null)
+                {
+                    rfid.AssetId = asset.Id;
+                    rfid.IsDeleted = false;
+                    rfidRepo.Update(rfid);
+                }
+                else
+                {
+                    await rfidRepo.AddAsync(new RFIDTag
+                    {
+                        Id = Guid.NewGuid(),
+                        EpcCode = epc,
+                        AssetId = asset.Id,
+                        Status = TagStatus.Active,
+                        CreatedOn = DateTime.UtcNow
+                    }, cancellationToken);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(asset.Barcode))
+            {
+                var bcVal = asset.Barcode.Trim();
+                var bcRepo = _unitOfWork.Repository<Barcode>();
+                var bcList = await bcRepo.GetFilteredAsync(b => b.BarcodeValue == bcVal, cancellationToken);
+                var bc = bcList.FirstOrDefault();
+                if (bc != null)
+                {
+                    bc.AssetId = asset.Id;
+                    bc.IsDeleted = false;
+                    bcRepo.Update(bc);
+                }
+                else
+                {
+                    await bcRepo.AddAsync(new Barcode
+                    {
+                        Id = Guid.NewGuid(),
+                        BarcodeValue = bcVal,
+                        AssetId = asset.Id,
+                        Format = "Code128",
+                        IsActive = true,
+                        CreatedOn = DateTime.UtcNow
+                    }, cancellationToken);
+                }
+            }
         }
     }
 }

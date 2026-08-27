@@ -95,62 +95,25 @@ namespace Application.Auth.Commands.Login
             var identityLower = (user.Username + " " + user.Email).ToLower();
             var isSuperAdmin = user.UserRoles.Any(ur => ur.Role != null && (ur.Role.Name == "Super Admin" || ur.Role.Name == "System Administrator"));
 
-            List<Site> userAllowedSites;
-            List<Warehouse> userAllowedWarehouses;
+            // Sites: Explicitly assigned + Created by this user
+            var userAllowedSites = allSites.Where(s =>
+                assignedSiteIds.Contains(s.Id) ||
+                (!string.IsNullOrWhiteSpace(s.CreatedBy) && (
+                    (!string.IsNullOrWhiteSpace(user.Email) && s.CreatedBy.Equals(user.Email, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(user.Username) && s.CreatedBy.Equals(user.Username, StringComparison.OrdinalIgnoreCase)) ||
+                    s.CreatedBy.Equals(user.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                ))
+            ).ToList();
 
-            if (isSuperAdmin && !assignedSiteIds.Any() && !assignedWhIds.Any() && !identityLower.Contains("devam"))
-            {
-                userAllowedSites = allSites.ToList();
-                userAllowedWarehouses = allWarehouses.ToList();
-            }
-            else if (assignedSiteIds.Any() || assignedWhIds.Any())
-            {
-                userAllowedSites = assignedSiteIds.Any()
-                    ? allSites.Where(s => assignedSiteIds.Contains(s.Id)).ToList()
-                    : new List<Site>();
-
-                if (!userAllowedSites.Any() && user.SiteId.HasValue)
-                {
-                    var s = allSites.FirstOrDefault(x => x.Id == user.SiteId.Value);
-                    if (s != null) userAllowedSites.Add(s);
-                }
-
-                // STRICT: Include ONLY warehouses that were explicitly assigned to this user!
-                if (assignedWhIds.Any())
-                {
-                    userAllowedWarehouses = allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList();
-                }
-                else if (isSuperAdmin)
-                {
-                    userAllowedWarehouses = allWarehouses.ToList();
-                }
-                else
-                {
-                    userAllowedWarehouses = new List<Warehouse>();
-                }
-            }
-            else if (identityLower.Contains("devam"))
-            {
-                userAllowedSites = allSites.Where(s => s.Name.ToLower().Contains("devam") || s.Code.ToLower().Contains("devam")).ToList();
-                userAllowedWarehouses = assignedWhIds.Any()
-                    ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
-                    : allWarehouses.Where(w => w.Name.ToLower().Contains("devam") || w.Code.ToLower().Contains("devam")).ToList();
-            }
-            else
-            {
-                if (user.SiteId.HasValue)
-                {
-                    userAllowedSites = allSites.Where(s => s.Id == user.SiteId.Value).ToList();
-                    userAllowedWarehouses = assignedWhIds.Any()
-                        ? allWarehouses.Where(w => assignedWhIds.Contains(w.Id)).ToList()
-                        : (isSuperAdmin ? allWarehouses.ToList() : new List<Warehouse>());
-                }
-                else
-                {
-                    userAllowedSites = isSuperAdmin ? allSites.ToList() : new List<Site>();
-                    userAllowedWarehouses = isSuperAdmin ? allWarehouses.ToList() : new List<Warehouse>();
-                }
-            }
+            // Warehouses: Explicitly assigned + Created by this user
+            var userAllowedWarehouses = allWarehouses.Where(w =>
+                assignedWhIds.Contains(w.Id) ||
+                (!string.IsNullOrWhiteSpace(w.CreatedBy) && (
+                    (!string.IsNullOrWhiteSpace(user.Email) && w.CreatedBy.Equals(user.Email, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(user.Username) && w.CreatedBy.Equals(user.Username, StringComparison.OrdinalIgnoreCase)) ||
+                    w.CreatedBy.Equals(user.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                ))
+            ).ToList();
 
             if (!user.SiteId.HasValue && userAllowedSites.Any())
             {

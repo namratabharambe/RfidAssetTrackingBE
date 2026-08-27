@@ -27,13 +27,13 @@ namespace Infrastructure.Services
             if (startDate.HasValue)
             {
                 var d = startDate.Value;
-                startUtc = DateTime.SpecifyKind(d.Date, DateTimeKind.Utc);
+                startUtc = new DateTime(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
             }
 
             if (endDate.HasValue)
             {
                 var d = endDate.Value;
-                endUtc = DateTime.SpecifyKind(d.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+                endUtc = new DateTime(d.Year, d.Month, d.Day, 23, 59, 59, 999, DateTimeKind.Utc).AddTicks(9999);
             }
 
             return (startUtc, endUtc);
@@ -49,7 +49,7 @@ namespace Infrastructure.Services
                 foreach (var cell in row)
                 {
                     var val = cell ?? "";
-                    if (val.Contains(",") || val.Contains("\"") || val.Contains("\n"))
+                    if (val.Contains(",") || val.Contains("\"") || val.Contains("\n") || val.Contains("\r"))
                     {
                         val = "\"" + val.Replace("\"", "\"\"") + "\"";
                     }
@@ -67,7 +67,7 @@ namespace Infrastructure.Services
             if (startUtc.HasValue) query = query.Where(x => x.CreatedOn >= startUtc.Value);
             if (endUtc.HasValue) query = query.Where(x => x.CreatedOn <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.SiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => x.Site != null && (x.Site.Name.ToLower() == s || x.Site.Code.ToLower() == s));
@@ -97,13 +97,13 @@ namespace Infrastructure.Services
         {
             var (startUtc, endUtc) = NormalizeDateRange(startDate, endDate);
             var query = _context.AssetMovements.Where(x => !x.IsDeleted);
-            if (startUtc.HasValue) query = query.Where(x => x.MovementDate >= startUtc.Value || x.CreatedOn >= startUtc.Value);
-            if (endUtc.HasValue) query = query.Where(x => x.MovementDate <= endUtc.Value || x.CreatedOn <= endUtc.Value);
+            if (startUtc.HasValue) query = query.Where(x => x.MovementDate >= startUtc.Value);
+            if (endUtc.HasValue) query = query.Where(x => x.MovementDate <= endUtc.Value);
             if (siteId.HasValue)
             {
                 query = query.Where(x => (x.Asset != null && x.Asset.SiteId == siteId.Value) || (x.Reader != null && x.Reader.SiteId == siteId.Value));
             }
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => (x.Asset != null && x.Asset.Site != null && (x.Asset.Site.Name.ToLower() == s || x.Asset.Site.Code.ToLower() == s))
@@ -142,7 +142,7 @@ namespace Infrastructure.Services
             if (startUtc.HasValue) query = query.Where(x => x.CreatedOn >= startUtc.Value);
             if (endUtc.HasValue) query = query.Where(x => x.CreatedOn <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.SiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => x.Site != null && (x.Site.Name.ToLower() == s || x.Site.Code.ToLower() == s));
@@ -174,7 +174,7 @@ namespace Infrastructure.Services
             if (startUtc.HasValue) query = query.Where(x => x.CreatedOn >= startUtc.Value);
             if (endUtc.HasValue) query = query.Where(x => x.CreatedOn <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.Asset != null && x.Asset.SiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => x.Asset != null && x.Asset.Site != null && (x.Asset.Site.Name.ToLower() == s || x.Asset.Site.Code.ToLower() == s));
@@ -203,10 +203,10 @@ namespace Infrastructure.Services
         {
             var (startUtc, endUtc) = NormalizeDateRange(startDate, endDate);
             var query = _context.GPSHistories.Where(x => !x.IsDeleted);
-            if (startUtc.HasValue) query = query.Where(x => x.Timestamp >= startUtc.Value || x.CreatedOn >= startUtc.Value);
-            if (endUtc.HasValue) query = query.Where(x => x.Timestamp <= endUtc.Value || x.CreatedOn <= endUtc.Value);
+            if (startUtc.HasValue) query = query.Where(x => x.Timestamp >= startUtc.Value);
+            if (endUtc.HasValue) query = query.Where(x => x.Timestamp <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.GPSDevice != null && x.GPSDevice.Asset != null && x.GPSDevice.Asset.SiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => x.GPSDevice != null && x.GPSDevice.Asset != null && x.GPSDevice.Asset.Site != null && (x.GPSDevice.Asset.Site.Name.ToLower() == s || x.GPSDevice.Asset.Site.Code.ToLower() == s));
@@ -236,8 +236,8 @@ namespace Infrastructure.Services
         {
             var (startUtc, endUtc) = NormalizeDateRange(startDate, endDate);
             var query = _context.InventoryAudits.Where(x => !x.IsDeleted);
-            if (startUtc.HasValue) query = query.Where(x => x.AuditDate >= startUtc.Value || x.CreatedOn >= startUtc.Value);
-            if (endUtc.HasValue) query = query.Where(x => x.AuditDate <= endUtc.Value || x.CreatedOn <= endUtc.Value);
+            if (startUtc.HasValue) query = query.Where(x => x.AuditDate >= startUtc.Value);
+            if (endUtc.HasValue) query = query.Where(x => x.AuditDate <= endUtc.Value);
 
             var audits = await query.Include(a => a.AuditorUser).ToListAsync(cancellationToken);
             var headers = new List<string> { "Audit Id", "Title", "Audit Date", "Status", "Auditor Name" };
@@ -283,10 +283,10 @@ namespace Infrastructure.Services
         {
             var (startUtc, endUtc) = NormalizeDateRange(startDate, endDate);
             var query = _context.AssetTransfers.Where(x => !x.IsDeleted);
-            if (startUtc.HasValue) query = query.Where(x => x.TransferDate >= startUtc.Value || x.CreatedOn >= startUtc.Value);
-            if (endUtc.HasValue) query = query.Where(x => x.TransferDate <= endUtc.Value || x.CreatedOn <= endUtc.Value);
+            if (startUtc.HasValue) query = query.Where(x => x.TransferDate >= startUtc.Value);
+            if (endUtc.HasValue) query = query.Where(x => x.TransferDate <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.SourceSiteId == siteId.Value || x.DestinationSiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => (x.SourceSite != null && (x.SourceSite.Name.ToLower() == s || x.SourceSite.Code.ToLower() == s))
@@ -328,10 +328,10 @@ namespace Infrastructure.Services
         {
             var (startUtc, endUtc) = NormalizeDateRange(startDate, endDate);
             var query = _context.AssetIssuances.Where(x => !x.IsDeleted);
-            if (startUtc.HasValue) query = query.Where(x => x.IssuedDate >= startUtc.Value || x.CreatedOn >= startUtc.Value);
-            if (endUtc.HasValue) query = query.Where(x => x.IssuedDate <= endUtc.Value || x.CreatedOn <= endUtc.Value);
+            if (startUtc.HasValue) query = query.Where(x => x.IssuedDate >= startUtc.Value);
+            if (endUtc.HasValue) query = query.Where(x => x.IssuedDate <= endUtc.Value);
             if (siteId.HasValue) query = query.Where(x => x.SiteId == siteId.Value);
-            if (!string.IsNullOrWhiteSpace(siteName))
+            if (!string.IsNullOrWhiteSpace(siteName) && !siteName.Equals("All Sites", StringComparison.OrdinalIgnoreCase) && !siteName.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 var s = siteName.Trim().ToLower();
                 query = query.Where(x => x.SiteName.ToLower() == s || (x.Site != null && (x.Site.Name.ToLower() == s || x.Site.Code.ToLower() == s)));

@@ -388,31 +388,114 @@ namespace API.Controllers
         }
 
         [HttpGet("vehicles")]
-        public async Task<IActionResult> GetVehicles()
+        public async Task<IActionResult> GetVehicles(
+            [FromQuery] Guid? siteId = null,
+            [FromQuery] Guid? warehouseId = null)
         {
-            var localVehicles = await _db.Vehicles.ToListAsync();
-            var gpsDevices = await _db.GPSDevices.ToListAsync();
+            // Resolve warehouse ID from query, header, or claims
+            Guid? targetWhId = warehouseId;
+            if (!targetWhId.HasValue && Request.Headers.TryGetValue("X-Warehouse-Id", out var hWh) && Guid.TryParse(hWh.FirstOrDefault(), out var parsedHWh) && parsedHWh != Guid.Empty)
+            {
+                targetWhId = parsedHWh;
+            }
+
+            // Resolve site ID from query, header, or claims
+            Guid? targetSiteId = siteId;
+            if (!targetSiteId.HasValue && Request.Headers.TryGetValue("X-Site-Id", out var hSite) && Guid.TryParse(hSite.FirstOrDefault(), out var parsedHSite) && parsedHSite != Guid.Empty)
+            {
+                targetSiteId = parsedHSite;
+            }
+
+            var isSuperAdmin = User.IsInRole("Super Admin") 
+                            || User.IsInRole("System Administrator")
+                            || User.HasClaim(c => (c.Type == "allowed_site_ids" || c.Type == "sites") && (c.Value == "ALL" || c.Value == "GLOBAL_ALL_SITES"));
+
+            var allowedSiteGuids = User.Claims
+                .Where(c => c.Type == "siteId" || c.Type == "sites" || c.Type == "site_id" || c.Type == "allowed_site_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var allowedWhGuids = User.Claims
+                .Where(c => c.Type == "warehouseId" || c.Type == "warehouses" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue && g.Value != Guid.Empty)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                             ?? User.FindFirst("sub")?.Value;
+            var currentEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                            ?? User.FindFirst("email")?.Value
+                            ?? User.Identity?.Name;
+
+            var gpsQuery = _db.GPSDevices.Include(g => g.Asset).Where(g => !g.IsDeleted);
+
+            if (targetWhId.HasValue)
+            {
+                gpsQuery = gpsQuery.Where(g => g.Asset != null && g.Asset.WarehouseId == targetWhId.Value);
+            }
+            else if (targetSiteId.HasValue)
+            {
+                gpsQuery = gpsQuery.Where(g => g.Asset != null && g.Asset.SiteId == targetSiteId.Value);
+            }
+            else if (!isSuperAdmin)
+            {
+                if (allowedWhGuids.Any())
+                {
+                    gpsQuery = gpsQuery.Where(g => 
+                        (g.Asset != null && g.Asset.WarehouseId.HasValue && allowedWhGuids.Contains(g.Asset.WarehouseId.Value)) ||
+                        (g.AssetId == null && (g.CreatedBy == currentUserId || (currentEmail != null && g.CreatedBy == currentEmail)))
+                    );
+                }
+                else if (allowedSiteGuids.Any())
+                {
+                    gpsQuery = gpsQuery.Where(g => 
+                        (g.Asset != null && g.Asset.SiteId.HasValue && allowedSiteGuids.Contains(g.Asset.SiteId.Value)) ||
+                        (g.AssetId == null && (g.CreatedBy == currentUserId || (currentEmail != null && g.CreatedBy == currentEmail)))
+                    );
+                }
+                else
+                {
+                    gpsQuery = gpsQuery.Where(g => 
+                        (g.Asset != null && (g.Asset.CreatedBy == currentUserId || (currentEmail != null && g.Asset.CreatedBy == currentEmail))) ||
+                        (g.CreatedBy == currentUserId || (currentEmail != null && g.CreatedBy == currentEmail))
+                    );
+                }
+            }
+
+            var allowedGpsDevices = await gpsQuery.ToListAsync();
+            var allowedImeis = allowedGpsDevices.Select(g => g.Imei).Where(i => !string.IsNullOrEmpty(i)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var localVehicles = await _db.Vehicles
+                .Where(v => !v.IsDeleted && (isSuperAdmin && !targetSiteId.HasValue && !targetWhId.HasValue ? true : allowedImeis.Contains(v.DeviceNum)))
+                .ToListAsync();
+
             bool changed = false;
             var rand = new Random();
 
-            foreach (var dev in gpsDevices)
+            foreach (var dev in allowedGpsDevices)
             {
-                if (!localVehicles.Any(v => v.DeviceNum == dev.Imei))
+                if (!localVehicles.Any(v => string.Equals(v.DeviceNum, dev.Imei, StringComparison.OrdinalIgnoreCase)))
                 {
                     var newVehicle = new Vehicle
                     {
                         Id = Guid.NewGuid(),
                         DeviceNum = dev.Imei,
-                        RegName = "GPS Tracker " + dev.Imei.Substring(Math.Max(0, dev.Imei.Length - 4)),
+                        RegName = dev.Asset?.Name ?? ("GPS Tracker " + (dev.Imei.Length > 4 ? dev.Imei.Substring(dev.Imei.Length - 4) : dev.Imei)),
                         Status = dev.Status == Domain.Enums.DeviceStatus.Online ? "Online" : "Offline",
-                        Lat = 18.6203 + (rand.NextDouble() - 0.5) * 0.003, // seed coordinates around Pune DC
+                        Lat = 18.6203 + (rand.NextDouble() - 0.5) * 0.003,
                         Lon = 73.8567 + (rand.NextDouble() - 0.5) * 0.003,
                         Speed = dev.Status == Domain.Enums.DeviceStatus.Online ? 15.0 : 0.0,
                         Direction = 90.0,
                         Battery = dev.BatteryLevel,
                         GpsTime = DateTime.UtcNow,
                         UpdateTime = DateTime.UtcNow,
-                        CreatedOn = DateTime.UtcNow
+                        CreatedOn = DateTime.UtcNow,
+                        CreatedBy = dev.CreatedBy ?? currentEmail ?? currentUserId
                     };
                     _db.Vehicles.Add(newVehicle);
                     localVehicles.Add(newVehicle);

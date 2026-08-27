@@ -23,6 +23,9 @@ namespace Infrastructure.Persistence.Repositories
                 .Include(a => a.Zone)
                 .Include(a => a.Location)
                 .Include(a => a.AssetCategory)
+                .Include(a => a.GPSDevices)
+                .Include(a => a.RFIDTags)
+                .Include(a => a.Barcodes)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
         }
@@ -37,6 +40,9 @@ namespace Infrastructure.Persistence.Repositories
                 .Include(a => a.Zone)
                 .Include(a => a.Location)
                 .Include(a => a.AssetCategory)
+                .Include(a => a.GPSDevices)
+                .Include(a => a.RFIDTags)
+                .Include(a => a.Barcodes)
                 .FirstOrDefaultAsync(
                     x => x.Id == id,
                     cancellationToken);

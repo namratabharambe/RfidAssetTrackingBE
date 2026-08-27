@@ -65,11 +65,9 @@ namespace API.Controllers
                 ?? User.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name || c.Type == System.Security.Claims.ClaimTypes.Email || c.Type == "unique_name" || c.Type == "email" || c.Type == "username")?.Value
                 ?? "";
 
-            var isSuperAdmin = User.IsInRole("Super Admin") || User.IsInRole("Admin") || User.IsInRole("Administrator") ||
-                User.Claims.Any(c => (c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role" || c.Type == "roles") &&
-                    (c.Value.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) ||
-                     c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
-                     c.Value.Equals("Administrator", StringComparison.OrdinalIgnoreCase)));
+            var hasGlobalAllClaim = User.Claims.Any(c => 
+                (c.Type == "allowed_site_ids" && c.Value == "ALL") ||
+                (c.Type == "sites" && c.Value == "GLOBAL_ALL_SITES"));
 
             var allowedSiteIds = User.Claims
                 .Where(c => c.Type == "sites" || c.Type == "siteId" || c.Type == "site_id" || c.Type == "allowed_site_ids")
@@ -79,10 +77,25 @@ namespace API.Controllers
                 .Distinct()
                 .ToList();
 
+            var allowedWarehouseIds = User.Claims
+                .Where(c => c.Type == "warehouses" || c.Type == "warehouseId" || c.Type == "warehouse_id" || c.Type == "allowed_warehouse_ids")
+                .Select(c => Guid.TryParse(c.Value, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToList();
+
             var targetSiteId = siteId ?? CurrentUserSiteId;
             var targetWarehouseId = warehouseId ?? CurrentUserWarehouseId;
 
-            var users = await _mediator.Send(new GetUsersQuery(targetSiteId, targetWarehouseId, allowedSiteIds, identity, isSuperAdmin));
+            var isRootAdmin = identity.Equals("admin", StringComparison.OrdinalIgnoreCase) || 
+                              identity.Equals("trackit@prosper.com", StringComparison.OrdinalIgnoreCase);
+
+            var isSuperAdmin = isRootAdmin || (
+                (User.IsInRole("Super Admin") || User.IsInRole("System Administrator") || hasGlobalAllClaim)
+                && !allowedSiteIds.Any() && !allowedWarehouseIds.Any() && !targetSiteId.HasValue && !targetWarehouseId.HasValue);
+
+            var users = await _mediator.Send(new GetUsersQuery(targetSiteId, targetWarehouseId, allowedSiteIds, allowedWarehouseIds, identity, isSuperAdmin));
             return Ok(users);
         }
 

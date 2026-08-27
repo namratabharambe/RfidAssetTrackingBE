@@ -34,6 +34,15 @@ namespace Application.Assets.Commands.CreateAsset
       string? InvoiceNumber = null,
       DateTime? InvoiceDate = null,
       string? PoNumber = null,
-      string? Image = null)
+      string? Image = null,
+      decimal? EntryQty = null,
+      decimal? IssuedQty = null,
+      decimal? BalanceQty = null,
+      decimal? BalancedQty = null,
+      string? Unit = null,
+      string? UnitQty = null,
+      string? GpsId = null,
+      string? RfidTag = null,
+      string? Barcode = null)
       : IRequest<Guid>;
 }

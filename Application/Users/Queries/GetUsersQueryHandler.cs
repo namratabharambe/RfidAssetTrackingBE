@@ -26,39 +26,69 @@ namespace Application.Users.Queries
         {
             var identityLower = (request.CurrentUserIdentity ?? "").Trim().ToLower();
             Guid? effectiveSiteId = request.SiteId;
+            Guid? effectiveWhId = request.WarehouseId;
+
+            var allActiveUsers = await _unitOfWork.Repository<User>().GetFilteredAsync(
+                u => !u.IsDeleted,
+                cancellationToken
+            );
 
             List<User> users;
 
-            if (request.AllowedSiteIds != null && request.AllowedSiteIds.Any() && !request.IsSuperAdmin)
+            if (request.IsSuperAdmin)
             {
-                var allowedIds = request.AllowedSiteIds.Select(id => (Guid?)id).ToList();
-                var allowedIdStrings = request.AllowedSiteIds.Select(id => id.ToString().ToLower()).ToList();
-
-                var allActiveUsers = await _unitOfWork.Repository<User>().GetFilteredAsync(
-                    u => !u.IsDeleted,
-                    cancellationToken
-                );
-
-                users = allActiveUsers.Where(u => 
-                    (u.SiteId.HasValue && allowedIds.Contains(u.SiteId)) ||
-                    (!string.IsNullOrEmpty(u.AllowedSiteIds) && allowedIdStrings.Any(aid => u.AllowedSiteIds.ToLower().Contains(aid))) ||
-                    u.Username.Equals(identityLower, StringComparison.OrdinalIgnoreCase) ||
-                    u.Email.Equals(identityLower, StringComparison.OrdinalIgnoreCase)
-                ).ToList();
-            }
-            else if (effectiveSiteId.HasValue && !request.IsSuperAdmin)
-            {
-                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
-                    u => !u.IsDeleted && u.SiteId == effectiveSiteId.Value,
-                    cancellationToken
-                );
+                users = allActiveUsers.ToList();
             }
             else
             {
-                users = await _unitOfWork.Repository<User>().GetFilteredAsync(
-                    u => !u.IsDeleted,
-                    cancellationToken
-                );
+                var allowedSiteGuids = new HashSet<Guid>(request.AllowedSiteIds ?? new List<Guid>());
+                if (effectiveSiteId.HasValue) allowedSiteGuids.Add(effectiveSiteId.Value);
+                var allowedSiteStrings = allowedSiteGuids.Select(id => id.ToString().ToLower()).ToHashSet();
+
+                var allowedWhGuids = new HashSet<Guid>(request.AllowedWarehouseIds ?? new List<Guid>());
+                if (effectiveWhId.HasValue) allowedWhGuids.Add(effectiveWhId.Value);
+                var allowedWhStrings = allowedWhGuids.Select(id => id.ToString().ToLower()).ToHashSet();
+
+                users = allActiveUsers.Where(u =>
+                {
+                    var uEmail = (u.Email ?? "").Trim().ToLower();
+                    var uName = (u.Username ?? "").Trim().ToLower();
+                    var uCreatedBy = (u.CreatedBy ?? "").Trim().ToLower();
+
+                    // 1. Current user themselves or users created by them
+                    if (uEmail == identityLower || uName == identityLower || (!string.IsNullOrEmpty(identityLower) && (uCreatedBy == identityLower || uCreatedBy.Contains(identityLower))))
+                    {
+                        return true;
+                    }
+
+                    // 2. Check primary site match
+                    if (u.SiteId.HasValue && allowedSiteGuids.Contains(u.SiteId.Value))
+                    {
+                        return true;
+                    }
+
+                    // 3. Check allowed sites CSV match
+                    if (!string.IsNullOrWhiteSpace(u.AllowedSiteIds))
+                    {
+                        var parts = u.AllowedSiteIds.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Any(p => allowedSiteStrings.Contains(p.Trim().ToLower())))
+                        {
+                            return true;
+                        }
+                    }
+
+                    // 4. Check allowed warehouses CSV match
+                    if (!string.IsNullOrWhiteSpace(u.AllowedWarehouseIds))
+                    {
+                        var parts = u.AllowedWarehouseIds.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Any(p => allowedWhStrings.Contains(p.Trim().ToLower())))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }).ToList();
             }
             
             // Populate roles and permissions

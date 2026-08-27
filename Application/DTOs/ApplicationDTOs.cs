@@ -102,10 +102,10 @@ namespace Application.DTOs
 
     // Physical Structure DTOs
     public record SiteDto(Guid Id, string Code, string Name, string? Address, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
-    public record CreateSiteDto(string Code, string Name, string? Address);
+    public record CreateSiteDto(string? Code, string Name, string? Address);
 
     public record WarehouseDto(Guid Id, string Code, string Name, string? Address, Guid? SiteId = null, string? SiteName = null, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
-    public record CreateWarehouseDto(string Code, string Name, string? Address, Guid? SiteId = null);
+    public record CreateWarehouseDto(string? Code, string Name, string? Address, Guid? SiteId = null);
 
     public record ZoneDto(Guid Id, string Code, string Name, string? Description, Guid WarehouseId, string WarehouseName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
     public record CreateZoneDto(string Code, string Name, string? Description, Guid WarehouseId);
@@ -139,13 +139,13 @@ namespace Application.DTOs
 
     // Tags & GPS DTOs
     public record RFIDTagDto(Guid Id, string EpcCode, string? TidCode, string Status, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
-    public record CreateRFIDTagDto(string EpcCode, string? TidCode, Guid? AssetId);
+    public record CreateRFIDTagDto(string EpcCode, string? TidCode, Guid? AssetId, string? Status = null);
 
     public record BarcodeDto(Guid Id, string BarcodeValue, string Format, bool IsActive, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
-    public record CreateBarcodeDto(string BarcodeValue, string Format, Guid? AssetId);
+    public record CreateBarcodeDto(string BarcodeValue, string Format, Guid? AssetId, bool? IsActive = null);
 
     public record GPSDeviceDto(Guid Id, string Imei, string? SimNumber, int BatteryLevel, string Status, Guid? AssetId, string? AssetName, string? CreatedBy = null, DateTime? CreatedOn = null, string? UpdatedBy = null, DateTime? UpdatedOn = null);
-    public record CreateGPSDeviceDto(string Imei, string? SimNumber, Guid? AssetId);
+    public record CreateGPSDeviceDto(string Imei, string? SimNumber, Guid? AssetId, string? Status = null);
 
     public record GPSHistoryDto(Guid Id, Guid GPSDeviceId, string Imei, double Latitude, double Longitude, double Speed, double Heading, DateTime Timestamp, string? GeofenceStatus);
     public record PostGPSLocationDto(string Imei, double Latitude, double Longitude, double Speed, double Heading, DateTime Timestamp);
