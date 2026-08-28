@@ -79,10 +79,23 @@ namespace Infrastructure.Services
             {
                 foreach (var userRole in user.UserRoles)
                 {
-                    if (userRole.Role != null && !string.IsNullOrEmpty(userRole.Role.Name))
+                    var rName = userRole.Role?.Name;
+                    if (string.IsNullOrEmpty(rName))
                     {
-                        roleNames.Add(userRole.Role.Name);
-                        claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
+                        if (userRole.RoleId == Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) rName = "Super Admin";
+                        else if (userRole.RoleId == Guid.Parse("e2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) rName = "Site Admin";
+                        else if (userRole.RoleId == Guid.Parse("0e9d0e01-c0a0-438d-a823-0544dc67ad6f")) rName = "Project Manager";
+                        else if (userRole.RoleId == Guid.Parse("e68f87f4-8b80-4d37-b787-a660dc0f8a56")) rName = "Store Keeper";
+                        else if (userRole.RoleId == Guid.Parse("a5736683-b651-4b38-aa67-5a07baa4d156")) rName = "Safety";
+                        else if (userRole.RoleId == Guid.Parse("e3a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) rName = "Supervisor";
+                        else if (userRole.RoleId == Guid.Parse("e4a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) rName = "Driver";
+                        else if (userRole.RoleId == Guid.Parse("e5a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) rName = "Viewer";
+                    }
+
+                    if (!string.IsNullOrEmpty(rName) && !roleNames.Contains(rName))
+                    {
+                        roleNames.Add(rName);
+                        claims.Add(new Claim(ClaimTypes.Role, rName));
                     }
                 }
             }

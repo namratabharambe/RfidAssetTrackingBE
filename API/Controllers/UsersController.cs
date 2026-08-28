@@ -224,7 +224,7 @@ namespace API.Controllers
             {
                 foreach (var roleId in targetRoleIds)
                 {
-                    var userRole = new UserRole { UserId = user.Id, RoleId = roleId };
+                    var userRole = new UserRole { Id = Guid.NewGuid(), UserId = user.Id, RoleId = roleId, CreatedOn = DateTime.UtcNow };
                     await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);
                 }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -256,80 +256,129 @@ namespace API.Controllers
         [HttpPut("{id:guid}")]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserDto updateDto, CancellationToken cancellationToken)
         {
-            // Validate Role IDs exist
-            if (updateDto.RoleIds != null && updateDto.RoleIds.Any())
+            try
             {
-                foreach (var roleId in updateDto.RoleIds)
+                var userRepo = _unitOfWork.Repository<User>();
+                var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
+                if (user == null) return NotFound(new { message = $"User with ID {id} not found." });
+
+                // Gather all assigned Site IDs across all alias properties
+                var allAssignedSiteGuids = new List<Guid>();
+                if (updateDto.AllowedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.AllowedSiteIds);
+                if (updateDto.SelectedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SelectedSiteIds);
+                if (updateDto.SiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SiteIds);
+                if (updateDto.SiteId.HasValue && !allAssignedSiteGuids.Contains(updateDto.SiteId.Value)) allAssignedSiteGuids.Add(updateDto.SiteId.Value);
+                allAssignedSiteGuids = allAssignedSiteGuids.Distinct().ToList();
+
+                // Gather all assigned Warehouse IDs across all alias properties
+                var allAssignedWhGuids = new List<Guid>();
+                if (updateDto.AllowedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.AllowedWarehouseIds);
+                if (updateDto.SelectedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.SelectedWarehouseIds);
+                if (updateDto.WarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.WarehouseIds);
+                allAssignedWhGuids = allAssignedWhGuids.Distinct().ToList();
+
+                var allowedSitesStr = allAssignedSiteGuids.Any() ? string.Join(",", allAssignedSiteGuids) : (updateDto.SiteId.HasValue ? updateDto.SiteId.Value.ToString() : user.AllowedSiteIds);
+                var allowedWhsStr = allAssignedWhGuids.Any() ? string.Join(",", allAssignedWhGuids) : user.AllowedWarehouseIds;
+                var primarySiteId = updateDto.SiteId ?? (allAssignedSiteGuids.Any() ? allAssignedSiteGuids.First() : user.SiteId);
+
+                user.Username = updateDto.Username;
+                user.Email = updateDto.Email;
+                user.IsActive = updateDto.IsActive;
+                user.SiteId = primarySiteId;
+                user.AllowedSiteIds = allowedSitesStr;
+                user.AllowedWarehouseIds = allowedWhsStr;
+
+                userRepo.Update(user);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                // Resolve role names to Role IDs if role names or IDs are provided
+                var targetRoleIds = updateDto.RoleIds != null ? new List<Guid>(updateDto.RoleIds) : new List<Guid>();
+                var roleNamesToResolve = new List<string>();
+                if (updateDto.Roles != null && updateDto.Roles.Any())
                 {
-                    var role = await _unitOfWork.Repository<Role>().GetByIdAsync(roleId, cancellationToken);
-                    if (role == null)
+                    roleNamesToResolve.AddRange(updateDto.Roles);
+                }
+                if (!string.IsNullOrWhiteSpace(updateDto.Role) && !roleNamesToResolve.Contains(updateDto.Role))
+                {
+                    roleNamesToResolve.Add(updateDto.Role);
+                }
+
+                if (roleNamesToResolve.Any())
+                {
+                    var allDbRoles = await _unitOfWork.Repository<Role>().GetAllAsync(cancellationToken);
+                    foreach (var rName in roleNamesToResolve)
                     {
-                        return BadRequest($"Role with ID '{roleId}' does not exist.");
+                        var matched = allDbRoles.FirstOrDefault(r => r.Name.Equals(rName.Trim(), StringComparison.OrdinalIgnoreCase));
+                        if (matched != null && !targetRoleIds.Contains(matched.Id))
+                        {
+                            targetRoleIds.Add(matched.Id);
+                        }
+                        else if (matched == null)
+                        {
+                            if (rName.Equals("Super Admin", StringComparison.OrdinalIgnoreCase) || rName.Equals("Administrator", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var superAdminGuid = Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62");
+                                if (!targetRoleIds.Contains(superAdminGuid)) targetRoleIds.Add(superAdminGuid);
+                            }
+                            else if (rName.Equals("Site Admin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var siteAdminGuid = Guid.Parse("e2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62");
+                                if (!targetRoleIds.Contains(siteAdminGuid)) targetRoleIds.Add(siteAdminGuid);
+                            }
+                            else if (rName.Equals("Project Manager", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var pmGuid = Guid.Parse("0e9d0e01-c0a0-438d-a823-0544dc67ad6f");
+                                if (!targetRoleIds.Contains(pmGuid)) targetRoleIds.Add(pmGuid);
+                            }
+                            else if (rName.Equals("Store Keeper", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var skGuid = Guid.Parse("e68f87f4-8b80-4d37-b787-a660dc0f8a56");
+                                if (!targetRoleIds.Contains(skGuid)) targetRoleIds.Add(skGuid);
+                            }
+                            else if (rName.Equals("Safety", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var safetyGuid = Guid.Parse("a5736683-b651-4b38-aa67-5a07baa4d156");
+                                if (!targetRoleIds.Contains(safetyGuid)) targetRoleIds.Add(safetyGuid);
+                            }
+                            else if (rName.Equals("Supervisor", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var supGuid = Guid.Parse("e3a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62");
+                                if (!targetRoleIds.Contains(supGuid)) targetRoleIds.Add(supGuid);
+                            }
+                        }
                     }
                 }
-            }
 
-            // Validate Site ID exists
-            if (updateDto.SiteId != null)
-            {
-                var site = await _unitOfWork.Repository<Site>().GetByIdAsync(updateDto.SiteId.Value, cancellationToken);
-                if (site == null)
+                // Update user roles only if new roles are specified, otherwise preserve existing roles
+                if (targetRoleIds.Any())
                 {
-                    return BadRequest($"Site with ID '{updateDto.SiteId}' does not exist.");
+                    var existingRoles = user.UserRoles.ToList();
+                    foreach (var er in existingRoles)
+                    {
+                        _unitOfWork.Repository<UserRole>().Remove(er);
+                    }
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    foreach (var roleId in targetRoleIds.Distinct())
+                    {
+                        var userRole = new UserRole
+                        {
+                            Id = Guid.NewGuid(),
+                            UserId = user.Id,
+                            RoleId = roleId,
+                            CreatedOn = DateTime.UtcNow
+                        };
+                        await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);
+                    }
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
+
+                return NoContent();
             }
-
-            var userRepo = _unitOfWork.Repository<User>();
-            var user = await userRepo.GetByIdAsync(id, cancellationToken, u => u.UserRoles);
-            if (user == null) return NotFound();
-
-            // Gather all assigned Site IDs across all alias properties
-            var allAssignedSiteGuids = new List<Guid>();
-            if (updateDto.AllowedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.AllowedSiteIds);
-            if (updateDto.SelectedSiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SelectedSiteIds);
-            if (updateDto.SiteIds != null) allAssignedSiteGuids.AddRange(updateDto.SiteIds);
-            if (updateDto.SiteId.HasValue && !allAssignedSiteGuids.Contains(updateDto.SiteId.Value)) allAssignedSiteGuids.Add(updateDto.SiteId.Value);
-            allAssignedSiteGuids = allAssignedSiteGuids.Distinct().ToList();
-
-            // Gather all assigned Warehouse IDs across all alias properties
-            var allAssignedWhGuids = new List<Guid>();
-            if (updateDto.AllowedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.AllowedWarehouseIds);
-            if (updateDto.SelectedWarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.SelectedWarehouseIds);
-            if (updateDto.WarehouseIds != null) allAssignedWhGuids.AddRange(updateDto.WarehouseIds);
-            allAssignedWhGuids = allAssignedWhGuids.Distinct().ToList();
-
-            var allowedSitesStr = allAssignedSiteGuids.Any() ? string.Join(",", allAssignedSiteGuids) : (updateDto.SiteId.HasValue ? updateDto.SiteId.Value.ToString() : user.AllowedSiteIds);
-            var allowedWhsStr = allAssignedWhGuids.Any() ? string.Join(",", allAssignedWhGuids) : user.AllowedWarehouseIds;
-            var primarySiteId = updateDto.SiteId ?? (allAssignedSiteGuids.Any() ? allAssignedSiteGuids.First() : user.SiteId);
-
-            user.Username = updateDto.Username;
-            user.Email = updateDto.Email;
-            user.IsActive = updateDto.IsActive;
-            user.SiteId = primarySiteId;
-            user.AllowedSiteIds = allowedSitesStr;
-            user.AllowedWarehouseIds = allowedWhsStr;
-
-            userRepo.Update(user);
-
-            // Update user roles
-            var existingRoles = user.UserRoles.ToList();
-            foreach (var er in existingRoles)
+            catch (Exception ex)
             {
-                _unitOfWork.Repository<UserRole>().Delete(er);
+                return StatusCode(500, new { message = "Failed to update user.", error = ex.Message, details = ex.InnerException?.Message });
             }
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            if (updateDto.RoleIds != null)
-            {
-                foreach (var roleId in updateDto.RoleIds)
-                {
-                    var userRole = new UserRole { UserId = user.Id, RoleId = roleId };
-                    await _unitOfWork.Repository<UserRole>().AddAsync(userRole, cancellationToken);
-                }
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-
-            return NoContent();
         }
 
         [HttpDelete("{id:guid}")]
@@ -342,7 +391,7 @@ namespace API.Controllers
             // Delete associated user roles
             foreach (var ur in user.UserRoles)
             {
-                _unitOfWork.Repository<UserRole>().Delete(ur);
+                _unitOfWork.Repository<UserRole>().Remove(ur);
             }
 
             userRepo.Delete(user);

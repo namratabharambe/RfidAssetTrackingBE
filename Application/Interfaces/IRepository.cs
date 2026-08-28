@@ -16,6 +16,7 @@ namespace Application.Interfaces
         Task AddAsync(T entity, CancellationToken cancellationToken = default);
         void Update(T entity);
         void Delete(T entity);
+        void Remove(T entity);
         
         Task<(List<T> Items, int TotalCount)> GetPagedAsync(
             int pageNumber,

@@ -49,6 +49,10 @@ namespace Infrastructure.Persistence.Repositories
 
         public virtual async Task AddAsync(T entity, CancellationToken cancellationToken = default)
         {
+            if (entity.Id == Guid.Empty)
+            {
+                entity.Id = Guid.NewGuid();
+            }
             entity.CreatedOn = DateTime.UtcNow;
             await DbSet.AddAsync(entity, cancellationToken);
         }
@@ -64,6 +68,11 @@ namespace Infrastructure.Persistence.Repositories
             entity.IsDeleted = true;
             entity.DeletedOn = DateTime.UtcNow;
             DbSet.Update(entity);
+        }
+
+        public virtual void Remove(T entity)
+        {
+            DbSet.Remove(entity);
         }
 
         public virtual async Task<(List<T> Items, int TotalCount)> GetPagedAsync(
