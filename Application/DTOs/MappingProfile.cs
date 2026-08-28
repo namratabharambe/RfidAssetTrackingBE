@@ -10,8 +10,12 @@ namespace Application.DTOs
         public MappingProfile()
         {
             CreateMap<User, UserDto>()
-                .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles.Select(ur => ur.Role.Name).ToList()))
-                .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src => src.UserRoles.SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code)).Distinct().ToList()))
+                .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles != null 
+                    ? src.UserRoles.Select(ur => ur.Role != null && !string.IsNullOrEmpty(ur.Role.Name) ? ur.Role.Name : ResolveKnownRoleName(ur.RoleId)).Where(r => !string.IsNullOrEmpty(r)).ToList()
+                    : new System.Collections.Generic.List<string>()))
+                .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src => src.UserRoles != null
+                    ? src.UserRoles.SelectMany(ur => ur.Role != null && ur.Role.RolePermissions != null ? ur.Role.RolePermissions.Select(rp => rp.Permission != null ? rp.Permission.Code : "") : new System.Collections.Generic.List<string>()).Distinct().Where(p => !string.IsNullOrEmpty(p)).ToList()
+                    : new System.Collections.Generic.List<string>()))
                 .ForMember(dest => dest.SiteName, opt => opt.MapFrom(src => src.Site != null ? src.Site.Name : null))
                 .ForMember(dest => dest.SelectedSiteIds, opt => opt.MapFrom(src => ParseGuidList(src.AllowedSiteIds, src.SiteId)))
                 .ForMember(dest => dest.SelectedWarehouseIds, opt => opt.MapFrom(src => ParseGuidList(src.AllowedWarehouseIds, null)));
@@ -167,6 +171,19 @@ namespace Application.DTOs
                 list.Add(fallbackId.Value);
             }
             return list;
+        }
+
+        private static string ResolveKnownRoleName(System.Guid roleId)
+        {
+            if (roleId == System.Guid.Parse("e1a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) return "Super Admin";
+            if (roleId == System.Guid.Parse("e2a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) return "Site Admin";
+            if (roleId == System.Guid.Parse("0e9d0e01-c0a0-438d-a823-0544dc67ad6f")) return "Project Manager";
+            if (roleId == System.Guid.Parse("e68f87f4-8b80-4d37-b787-a660dc0f8a56")) return "Store Keeper";
+            if (roleId == System.Guid.Parse("a5736683-b651-4b38-aa67-5a07baa4d156")) return "Safety";
+            if (roleId == System.Guid.Parse("e3a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) return "Supervisor";
+            if (roleId == System.Guid.Parse("e4a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) return "Driver";
+            if (roleId == System.Guid.Parse("e5a2b3c4-d5e6-7a8b-9c0d-1e2f3a4b5c62")) return "Viewer";
+            return "";
         }
     }
 
